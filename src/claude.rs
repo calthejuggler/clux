@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -96,7 +96,7 @@ fn encode_cwd(cwd: &str) -> String {
 }
 
 #[allow(clippy::verbose_file_reads)]
-fn read_last_line(path: &PathBuf) -> Option<String> {
+fn read_last_line(path: &Path) -> Option<String> {
     let mut file = std::fs::File::open(path).ok()?;
     let file_len = file.metadata().ok()?.len();
     if file_len == 0 {

@@ -6,8 +6,7 @@ fn get_ppid(pid: u32) -> Option<u32> {
     // Format: pid (comm) state ppid ...
     // comm can contain spaces/parens, so find last ')' then parse fields after
     let after_comm = stat.rsplit_once(')')?.1;
-    let fields: Vec<&str> = after_comm.split_whitespace().collect();
-    fields.get(1)?.parse().ok()
+    after_comm.split_whitespace().nth(1)?.parse().ok()
 }
 
 #[cfg(target_os = "macos")]
@@ -21,8 +20,8 @@ fn build_process_tree() -> HashMap<u32, u32> {
     };
     let stdout = String::from_utf8_lossy(&output.stdout);
     for line in stdout.lines().skip(1) {
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        if let (Some(pid), Some(ppid)) = (fields.first(), fields.get(1)) {
+        let mut fields = line.split_whitespace();
+        if let (Some(pid), Some(ppid)) = (fields.next(), fields.next()) {
             if let (Ok(pid), Ok(ppid)) = (pid.parse::<u32>(), ppid.parse::<u32>()) {
                 tree.insert(pid, ppid);
             }
