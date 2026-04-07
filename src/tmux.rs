@@ -32,15 +32,17 @@ pub fn set_session_option(
     key: &str,
     value: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let target = format!("{session}:");
     let _ = Command::new("tmux")
-        .args(["set", "-t", session, key, value])
+        .args(["set", "-t", &target, key, value])
         .output()?;
     Ok(())
 }
 
 pub fn unset_session_option(session: &str, key: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let target = format!("{session}:");
     let _ = Command::new("tmux")
-        .args(["set", "-t", session, "-u", key])
+        .args(["set", "-t", &target, "-u", key])
         .output()?;
     Ok(())
 }
