@@ -37,11 +37,22 @@ Then press `prefix + I` to install.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `@clux-key` | `s` | Key to bind the session picker (after prefix) |
+| `@clux-format` | ` \| 🤖 {total} ({detail})` | Format string for session status |
 
-Example:
+#### Format placeholders
+
+| Placeholder | Description | Example |
+|-------------|-------------|---------|
+| `{total}` | Total Claude sessions | `3` |
+| `{active}` | Sessions waiting for input | `2` |
+| `{idle}` | Sessions finished responding | `1` |
+| `{detail}` | Smart summary (omits zero counts) | `2 active, 1 idle` |
+
+Examples:
 
 ```sh
 set -g @clux-key 'S'
+set -g @clux-format ' | 🤖 {active}/{total}'
 ```
 
 ### Install manually
@@ -58,7 +69,7 @@ Pre-built binaries are available for Linux and macOS (both x86_64 and aarch64). 
 ## Roadmap
 
 - [x] Configurable keybinding
-- [ ] Customizable status bar format
+- [x] Customizable status bar format
 - [ ] Session filtering options
 - [ ] Other coding agent softwares
 

@@ -22,10 +22,29 @@ struct SessionCounts {
     idle: u32,
 }
 
+const DEFAULT_FORMAT: &str = " | \u{1F916} {total} ({detail})";
+
+fn format_info(format_str: &str, counts: &SessionCounts) -> String {
+    let total = counts.active + counts.idle;
+    let detail = match (counts.active, counts.idle) {
+        (active, 0) => format!("{active} active"),
+        (0, idle) => format!("{idle} idle"),
+        (active, idle) => format!("{active} active, {idle} idle"),
+    };
+
+    format_str
+        .replace("{total}", &total.to_string())
+        .replace("{active}", &counts.active.to_string())
+        .replace("{idle}", &counts.idle.to_string())
+        .replace("{detail}", &detail)
+}
+
 fn run_update() -> Result<(), Box<dyn std::error::Error>> {
     let sessions = claude::discover_sessions();
     let pane_map = tmux::list_panes()?;
     let all_tmux_sessions = tmux::list_sessions()?;
+    let custom_format = tmux::get_global_option("@clux-format")?;
+    let format_str = custom_format.as_deref().unwrap_or(DEFAULT_FORMAT);
 
     let mut counts: HashMap<String, SessionCounts> = HashMap::new();
 
@@ -44,14 +63,8 @@ fn run_update() -> Result<(), Box<dyn std::error::Error>> {
 
     for tmux_session in &all_tmux_sessions {
         match counts.get(tmux_session) {
-            Some(c) => {
-                let total = c.active + c.idle;
-                let detail = match (c.active, c.idle) {
-                    (a, 0) => format!("{a} active"),
-                    (0, i) => format!("{i} idle"),
-                    (a, i) => format!("{a} active, {i} idle"),
-                };
-                let info = format!(" | \u{1F916} {total} ({detail})");
+            Some(session_counts) => {
+                let info = format_info(format_str, session_counts);
                 tmux::set_session_option(tmux_session, "@clux_info", &info)?;
             }
             None => {

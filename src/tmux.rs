@@ -44,3 +44,15 @@ pub fn unset_session_option(session: &str, key: &str) -> Result<(), Box<dyn std:
         .output()?;
     Ok(())
 }
+
+pub fn get_global_option(key: &str) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    let output = Command::new("tmux")
+        .args(["show-option", "-gqv", key])
+        .output()?;
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(value))
+    }
+}
