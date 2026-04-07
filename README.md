@@ -32,6 +32,18 @@ set -g @plugin 'calthejuggler/clux'
 
 Then press `prefix + I` to install.
 
+### Configuration
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `@clux-key` | `s` | Key to bind the session picker (after prefix) |
+
+Example:
+
+```sh
+set -g @clux-key 'S'
+```
+
 ### Install manually
 
 Clone the repo and run the install script:
@@ -45,7 +57,7 @@ Pre-built binaries are available for Linux and macOS (both x86_64 and aarch64). 
 
 ## Roadmap
 
-- [ ] Configurable keybinding
+- [x] Configurable keybinding
 - [ ] Customizable status bar format
 - [ ] Session filtering options
 - [ ] Other coding agent softwares

@@ -10,4 +10,7 @@ if [[ ! -f "${BINARY}" ]]; then
     }
 fi
 
-tmux bind-key s run-shell "${CURRENT_DIR}/scripts/session-select.sh"
+KEY=$(tmux show-option -gqv @clux-key)
+KEY="${KEY:-s}"
+
+tmux bind-key "${KEY}" run-shell "${CURRENT_DIR}/scripts/session-select.sh"
