@@ -52,6 +52,19 @@ main() {
         exit 1
     fi
 
+    local version_file="${BIN_DIR}/.version"
+    local current_version=""
+    local expected_version
+    expected_version="$(grep '^version' "${PLUGIN_DIR}/Cargo.toml" | head -1 | sed 's/.*"\(.*\)"/\1/')"
+
+    if [[ -f "${version_file}" ]]; then
+        current_version="$(cat "${version_file}")"
+    fi
+
+    if [[ -f "${BIN_DIR}/clux" && "${current_version}" == "${expected_version}" ]]; then
+        return 0
+    fi
+
     local asset="clux-${platform}"
     local url="https://github.com/${REPO}/releases/latest/download/${asset}"
 
@@ -68,7 +81,8 @@ main() {
 
     if [[ "${download_exit}" -eq 0 ]]; then
         chmod +x "${BIN_DIR}/clux"
-        echo "clux: installed successfully"
+        echo "${expected_version}" > "${version_file}"
+        echo "clux: installed v${expected_version} successfully"
         return 0
     fi
 
@@ -77,7 +91,8 @@ main() {
         (cd "${PLUGIN_DIR}" && cargo build --release)
         mkdir -p "${BIN_DIR}"
         cp "${PLUGIN_DIR}/target/release/clux" "${BIN_DIR}/clux"
-        echo "clux: built from source successfully"
+        echo "${expected_version}" > "${version_file}"
+        echo "clux: built v${expected_version} from source successfully"
         return 0
     fi
 
