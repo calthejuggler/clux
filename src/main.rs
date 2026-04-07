@@ -7,12 +7,13 @@ use std::collections::HashMap;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("update") {
-        if let Err(e) = run_update() {
+        let filter = args.get(2).map_or("all", String::as_str);
+        if let Err(e) = run_update(filter) {
             eprintln!("clux: {e}");
             std::process::exit(1);
         }
     } else {
-        eprintln!("Usage: clux update");
+        eprintln!("Usage: clux update [filter]");
         std::process::exit(1);
     }
 }
@@ -39,7 +40,16 @@ fn format_info(format_str: &str, counts: &SessionCounts) -> String {
         .replace("{detail}", &detail)
 }
 
-fn run_update() -> Result<(), Box<dyn std::error::Error>> {
+fn is_visible(filter: &str, counts: Option<&SessionCounts>) -> bool {
+    match filter {
+        "has-claude" => counts.is_some(),
+        "active" => counts.is_some_and(|c| c.active > 0),
+        "idle" => counts.is_some_and(|c| c.idle > 0),
+        _ => true,
+    }
+}
+
+fn run_update(filter: &str) -> Result<(), Box<dyn std::error::Error>> {
     let sessions = claude::discover_sessions();
     let pane_map = tmux::list_panes()?;
     let all_tmux_sessions = tmux::list_sessions()?;
@@ -62,9 +72,17 @@ fn run_update() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     for tmux_session in &all_tmux_sessions {
-        match counts.get(tmux_session) {
-            Some(session_counts) => {
-                let info = format_info(format_str, session_counts);
+        let session_counts = counts.get(tmux_session);
+        let visible = is_visible(filter, session_counts);
+        tmux::set_session_option(
+            tmux_session,
+            "@clux_visible",
+            if visible { "1" } else { "0" },
+        )?;
+
+        match session_counts {
+            Some(c) => {
+                let info = format_info(format_str, c);
                 tmux::set_session_option(tmux_session, "@clux_info", &info)?;
             }
             None => {

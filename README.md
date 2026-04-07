@@ -38,6 +38,7 @@ Then press `prefix + I` to install.
 |--------|---------|-------------|
 | `@clux-key` | `s` | Key to bind the session picker (after prefix) |
 | `@clux-format` | ` \| 🤖 {total} ({detail})` | Format string for session status |
+| `@clux-filter-binds` | _(none)_ | Comma-separated `key:filter` pairs for filtered pickers |
 
 #### Format placeholders
 
@@ -48,12 +49,23 @@ Then press `prefix + I` to install.
 | `{idle}` | Sessions finished responding | `1` |
 | `{detail}` | Smart summary (omits zero counts) | `2 active, 1 idle` |
 
+#### Filter values
+
+| Filter | Shows |
+|--------|-------|
+| `has-claude` | Only sessions with Claude running |
+| `active` | Only sessions with Claude waiting for input |
+| `idle` | Only sessions where Claude finished responding |
+
 Examples:
 
 ```sh
-set -g @clux-key 'S'
+set -g @clux-key 's'
 set -g @clux-format ' | 🤖 {active}/{total}'
+set -g @clux-filter-binds 'S:has-claude,A:active,I:idle'
 ```
+
+This binds `prefix + s` to the full session picker, `prefix + S` to show only sessions with Claude, `prefix + A` for active sessions, and `prefix + I` for idle sessions.
 
 ### Install manually
 
@@ -70,7 +82,7 @@ Pre-built binaries are available for Linux and macOS (both x86_64 and aarch64). 
 
 - [x] Configurable keybinding
 - [x] Customizable status bar format
-- [ ] Session filtering options
+- [x] Session filtering options
 - [ ] Other coding agent softwares
 
 Check the [open issues](https://github.com/calthejuggler/clux/issues) for more.
