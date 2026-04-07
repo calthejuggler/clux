@@ -1,0 +1,65 @@
+use std::collections::HashMap;
+
+#[cfg(target_os = "linux")]
+fn get_ppid(pid: u32) -> Option<u32> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // Format: pid (comm) state ppid ...
+    // comm can contain spaces/parens, so find last ')' then parse fields after
+    let after_comm = stat.rsplit_once(')')?.1;
+    let fields: Vec<&str> = after_comm.split_whitespace().collect();
+    fields.get(1)?.parse().ok()
+}
+
+#[cfg(target_os = "macos")]
+fn build_process_tree() -> HashMap<u32, u32> {
+    let mut tree = HashMap::new();
+    let Ok(output) = std::process::Command::new("ps")
+        .args(["-eo", "pid,ppid"])
+        .output()
+    else {
+        return tree;
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines().skip(1) {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if let (Some(pid), Some(ppid)) = (fields.first(), fields.get(1)) {
+            if let (Ok(pid), Ok(ppid)) = (pid.parse::<u32>(), ppid.parse::<u32>()) {
+                tree.insert(pid, ppid);
+            }
+        }
+    }
+    tree
+}
+
+#[cfg(target_os = "linux")]
+pub fn find_tmux_session(pid: u32, pane_map: &HashMap<u32, String>) -> Option<String> {
+    let mut current = pid;
+    for _ in 0..20 {
+        let ppid = get_ppid(current)?;
+        if let Some(session) = pane_map.get(&ppid) {
+            return Some(session.clone());
+        }
+        if ppid <= 1 {
+            return None;
+        }
+        current = ppid;
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+pub fn find_tmux_session(pid: u32, pane_map: &HashMap<u32, String>) -> Option<String> {
+    let tree = build_process_tree();
+    let mut current = pid;
+    for _ in 0..20 {
+        let ppid = tree.get(&current)?;
+        if let Some(session) = pane_map.get(ppid) {
+            return Some(session.clone());
+        }
+        if *ppid <= 1 {
+            return None;
+        }
+        current = *ppid;
+    }
+    None
+}
