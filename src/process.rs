@@ -21,9 +21,9 @@ fn build_process_tree() -> HashMap<u32, u32> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     for line in stdout.lines().skip(1) {
         let mut fields = line.split_whitespace();
-        if let (Some(pid), Some(ppid)) = (fields.next(), fields.next()) {
-            if let (Ok(pid), Ok(ppid)) = (pid.parse::<u32>(), ppid.parse::<u32>()) {
-                tree.insert(pid, ppid);
+        if let (Some(pid_str), Some(ppid_str)) = (fields.next(), fields.next()) {
+            if let (Ok(pid), Ok(ppid)) = (pid_str.parse::<u32>(), ppid_str.parse::<u32>()) {
+                let _ = tree.insert(pid, ppid);
             }
         }
     }
