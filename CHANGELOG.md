@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/calthejuggler/clux/compare/v0.1.7...v0.2.0) - 2026-04-12
+
+### Added
+
+- add configurable sort order for list and pick commands ([#9](https://github.com/calthejuggler/clux/pull/9))
+
+### Other
+
+- remove clippy::verbose_file_reads allow in read_tail_chunk
+
 ## [0.1.7](https://github.com/calthejuggler/clux/compare/v0.1.6...v0.1.7) - 2026-04-12
 
 ### Other
