@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.6](https://github.com/calthejuggler/clux/compare/v0.1.5...v0.1.6) - 2026-04-12
 
+### Added
+
+- add clap CLI, anyhow errors, and crates.io publishing
+
 ### Other
 
 - use PAT for release-plz PRs to trigger CI checks
