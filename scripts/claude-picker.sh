@@ -10,14 +10,34 @@ if [[ -z "${LINES}" ]]; then
     exit 0
 fi
 
+format_rows() {
+    while IFS=$'\t' read -r target state mode tasks agents summary cwd session_name; do
+        if [[ ${#summary} -gt 40 ]]; then
+            summary="${summary:0:37}..."
+        fi
+        if [[ ${#cwd} -gt 25 ]]; then
+            cwd="${cwd:0:22}..."
+        fi
+        printf "%s\t%-7s  %-11s  %5s  %6s  %-40s  %-25s  %s\n" \
+            "${target}" "${state}" "${mode}" "${tasks}" "${agents}" "${summary}" "${cwd}" "${session_name}"
+    done <<< "${LINES}"
+}
+
 pick_with_fzf() {
+    local header
+    header=$(printf "%-7s  %-11s  %5s  %6s  %-40s  %-25s  %s" \
+        "STATE" "MODE" "TASKS" "AGENTS" "SUMMARY" "CWD" "SESSION")
+
+    local rows
+    rows=$(format_rows) || true
+
     local selected
-    selected=$(echo "${LINES}" | fzf-tmux -p 80%,50% \
+    selected=$(echo "${rows}" | fzf-tmux -p 80%,50% \
         --delimiter=$'\t' \
         --with-nth=2.. \
-        --header='Claude Sessions (state | mode | tasks | agents | summary | cwd | tmux session)' \
+        --header="${header}" \
         --no-preview \
-        --reverse)
+        --reverse) || true
 
     if [[ -n "${selected}" ]]; then
         local target
