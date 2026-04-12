@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5](https://github.com/calthejuggler/clux/compare/v0.1.4...v0.1.5) - 2026-04-12
+
+### Added
+
+- separate lib/bin functions
+
+### Fixed
+
+- re-stage files after cargo fmt in pre-commit hook
+
+### Other
+
+- fix release-plz config
+- add even more tests
+- add more tests
+- add test suite
+- add fail-fast false to release matrix
+
 ## [0.1.4](https://github.com/calthejuggler/clux/releases/tag/v0.1.4) - 2026-04-12
 
 ### Added
