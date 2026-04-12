@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 #[derive(Deserialize)]
@@ -370,7 +370,6 @@ pub fn encode_cwd(cwd: &str) -> String {
     cwd.replace('/', "-")
 }
 
-#[allow(clippy::verbose_file_reads)]
 pub fn read_tail_chunk(path: &Path) -> Option<String> {
     let mut file = std::fs::File::open(path).ok()?;
     let file_len = file.metadata().ok()?.len();
@@ -382,8 +381,7 @@ pub fn read_tail_chunk(path: &Path) -> Option<String> {
     let start = file_len.saturating_sub(chunk_size);
     let _ = file.seek(SeekFrom::Start(start)).ok()?;
 
-    let mut buf = String::new();
-    let _ = file.read_to_string(&mut buf).ok()?;
+    let mut buf = std::io::read_to_string(&mut file).ok()?;
 
     if start > 0
         && let Some(newline_pos) = buf.find('\n')
