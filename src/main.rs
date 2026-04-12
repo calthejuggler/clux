@@ -1,4 +1,5 @@
 mod claude;
+mod history;
 mod process;
 mod tmux;
 
@@ -6,15 +7,24 @@ use std::collections::HashMap;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.get(1).map(String::as_str) == Some("update") {
-        let filter = args.get(2).map_or("all", String::as_str);
-        if let Err(e) = run_update(filter) {
-            eprintln!("clux: {e}");
+    match args.get(1).map(String::as_str) {
+        Some("update") => {
+            let filter = args.get(2).map_or("all", String::as_str);
+            if let Err(e) = run_update(filter) {
+                eprintln!("clux: {e}");
+                std::process::exit(1);
+            }
+        }
+        Some("list") => {
+            if let Err(e) = run_list() {
+                eprintln!("clux: {e}");
+                std::process::exit(1);
+            }
+        }
+        _ => {
+            eprintln!("Usage: clux <update [filter]|list>");
             std::process::exit(1);
         }
-    } else {
-        eprintln!("Usage: clux update [filter]");
-        std::process::exit(1);
     }
 }
 
@@ -47,6 +57,48 @@ fn is_visible(filter: &str, counts: Option<&SessionCounts>) -> bool {
         "idle" => counts.is_some_and(|c| c.idle > 0),
         _ => true,
     }
+}
+
+fn shorten_cwd(cwd: &str) -> String {
+    match std::env::var("HOME") {
+        Ok(home) if cwd.starts_with(&home) => {
+            let mut short = String::from("~");
+            short.push_str(cwd.get(home.len()..).unwrap_or_default());
+            short
+        }
+        _ => cwd.to_owned(),
+    }
+}
+
+fn run_list() -> Result<(), Box<dyn std::error::Error>> {
+    let sessions = claude::discover_sessions();
+    let pane_map = tmux::list_pane_targets()?;
+    let first_messages = history::load_first_messages();
+
+    for session in &sessions {
+        let Some(pane) = process::find_tmux_pane(session.pid, &pane_map) else {
+            continue;
+        };
+
+        let state = claude::detect_state(session);
+        let state_str = match state {
+            claude::SessionState::Active => "active",
+            claude::SessionState::Idle => "idle",
+        };
+
+        let summary = first_messages
+            .get(&session.session_id)
+            .map_or("(no summary)", String::as_str);
+
+        let cwd = shorten_cwd(&session.cwd);
+
+        println!(
+            "{}\t{}\t{}\t{}\t{}",
+            pane.target, state_str, summary, cwd, pane.session_name
+        );
+    }
+
+    Ok(())
 }
 
 fn run_update(filter: &str) -> Result<(), Box<dyn std::error::Error>> {

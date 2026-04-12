@@ -1,10 +1,9 @@
+use crate::tmux::PaneInfo;
 use std::collections::HashMap;
 
 #[cfg(target_os = "linux")]
 fn get_ppid(pid: u32) -> Option<u32> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    // Format: pid (comm) state ppid ...
-    // comm can contain spaces/parens, so find last ')' then parse fields after
     let after_comm = stat.rsplit_once(')')?.1;
     after_comm.split_whitespace().nth(1)?.parse().ok()
 }
@@ -31,12 +30,12 @@ fn build_process_tree() -> HashMap<u32, u32> {
 }
 
 #[cfg(target_os = "linux")]
-pub fn find_tmux_session(pid: u32, pane_map: &HashMap<u32, String>) -> Option<String> {
+fn walk_parents<T>(pid: u32, map: &HashMap<u32, T>) -> Option<&T> {
     let mut current = pid;
     for _ in 0..20 {
         let ppid = get_ppid(current)?;
-        if let Some(session) = pane_map.get(&ppid) {
-            return Some(session.clone());
+        if let Some(value) = map.get(&ppid) {
+            return Some(value);
         }
         if ppid <= 1 {
             return None;
@@ -47,13 +46,13 @@ pub fn find_tmux_session(pid: u32, pane_map: &HashMap<u32, String>) -> Option<St
 }
 
 #[cfg(target_os = "macos")]
-pub fn find_tmux_session(pid: u32, pane_map: &HashMap<u32, String>) -> Option<String> {
+fn walk_parents<T>(pid: u32, map: &HashMap<u32, T>) -> Option<&T> {
     let tree = build_process_tree();
     let mut current = pid;
     for _ in 0..20 {
         let ppid = tree.get(&current)?;
-        if let Some(session) = pane_map.get(ppid) {
-            return Some(session.clone());
+        if let Some(value) = map.get(ppid) {
+            return Some(value);
         }
         if *ppid <= 1 {
             return None;
@@ -61,4 +60,12 @@ pub fn find_tmux_session(pid: u32, pane_map: &HashMap<u32, String>) -> Option<St
         current = *ppid;
     }
     None
+}
+
+pub fn find_tmux_session(pid: u32, pane_map: &HashMap<u32, String>) -> Option<String> {
+    walk_parents(pid, pane_map).cloned()
+}
+
+pub fn find_tmux_pane(pid: u32, pane_map: &HashMap<u32, PaneInfo>) -> Option<&PaneInfo> {
+    walk_parents(pid, pane_map)
 }

@@ -12,6 +12,10 @@ KEY="${KEY:-s}"
 
 tmux bind-key "${KEY}" run-shell "${CURRENT_DIR}/scripts/session-select.sh"
 
+CLAUDE_KEY=$(tmux show-option -gqv @clux-claude-key)
+CLAUDE_KEY="${CLAUDE_KEY:-a}"
+tmux bind-key "${CLAUDE_KEY}" run-shell "${CURRENT_DIR}/scripts/claude-picker.sh"
+
 FILTER_BINDS=$(tmux show-option -gqv @clux-filter-binds)
 if [[ -n "${FILTER_BINDS}" ]]; then
     IFS=',' read -ra PAIRS <<< "${FILTER_BINDS}"

@@ -1,6 +1,41 @@
 use std::collections::HashMap;
 use std::process::Command;
 
+pub struct PaneInfo {
+    pub session_name: String,
+    pub target: String,
+}
+
+pub fn list_pane_targets() -> Result<HashMap<u32, PaneInfo>, Box<dyn std::error::Error>> {
+    let output = Command::new("tmux")
+        .args([
+            "list-panes",
+            "-a",
+            "-F",
+            "#{pane_pid}\t#{session_name}:#{window_index}.#{pane_index}\t#{session_name}",
+        ])
+        .output()?;
+
+    let mut map = HashMap::new();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        let mut parts = line.splitn(3, '\t');
+        if let (Some(pid_str), Some(target), Some(session_name)) =
+            (parts.next(), parts.next(), parts.next())
+            && let Ok(pid) = pid_str.parse::<u32>()
+        {
+            let _ = map.insert(
+                pid,
+                PaneInfo {
+                    session_name: session_name.to_owned(),
+                    target: target.to_owned(),
+                },
+            );
+        }
+    }
+    Ok(map)
+}
+
 pub fn list_panes() -> Result<HashMap<u32, String>, Box<dyn std::error::Error>> {
     let output = Command::new("tmux")
         .args(["list-panes", "-a", "-F", "#{pane_pid} #{session_name}"])
