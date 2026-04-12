@@ -80,10 +80,17 @@ fn run_list() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         };
 
-        let state = claude::detect_state(session);
-        let state_str = match state {
+        let info = claude::detect_info(session);
+        let state_str = match info.state {
             claude::SessionState::Active => "active",
             claude::SessionState::Idle => "idle",
+        };
+
+        let mode_str = match info.mode {
+            claude::SessionMode::Default => "default",
+            claude::SessionMode::AcceptEdits => "acceptEdits",
+            claude::SessionMode::BypassPermissions => "yolo",
+            claude::SessionMode::Plan => "plan",
         };
 
         let summary = first_messages
@@ -93,8 +100,15 @@ fn run_list() -> Result<(), Box<dyn std::error::Error>> {
         let cwd = shorten_cwd(&session.cwd);
 
         println!(
-            "{}\t{}\t{}\t{}\t{}",
-            pane.target, state_str, summary, cwd, pane.session_name
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            pane.target,
+            state_str,
+            mode_str,
+            info.active_tasks,
+            info.active_agents,
+            summary,
+            cwd,
+            pane.session_name
         );
     }
 
@@ -112,11 +126,11 @@ fn run_update(filter: &str) -> Result<(), Box<dyn std::error::Error>> {
 
     for session in &sessions {
         if let Some(tmux_session) = process::find_tmux_session(session.pid, &pane_map) {
-            let state = claude::detect_state(session);
+            let info = claude::detect_info(session);
             let entry = counts
                 .entry(tmux_session)
                 .or_insert(SessionCounts { active: 0, idle: 0 });
-            match state {
+            match info.state {
                 claude::SessionState::Active => entry.active += 1,
                 claude::SessionState::Idle => entry.idle += 1,
             }

@@ -15,7 +15,7 @@ pick_with_fzf() {
     selected=$(echo "${LINES}" | fzf-tmux -p 80%,50% \
         --delimiter=$'\t' \
         --with-nth=2.. \
-        --header='Claude Sessions (state | summary | cwd | tmux session)' \
+        --header='Claude Sessions (state | mode | tasks | agents | summary | cwd | tmux session)' \
         --no-preview \
         --reverse)
 
@@ -29,8 +29,8 @@ pick_with_fzf() {
 pick_with_menu() {
     local args=()
     local idx=0
-    while IFS=$'\t' read -r target state summary cwd session_name; do
-        local label="${state} | ${summary} | ${cwd} (${session_name})"
+    while IFS=$'\t' read -r target state mode tasks agents summary cwd session_name; do
+        local label="${state} | ${mode} | ${tasks} tasks | ${agents} agents | ${summary} | ${cwd} (${session_name})"
         if [[ ${#label} -gt 70 ]]; then
             label="${label:0:67}..."
         fi
