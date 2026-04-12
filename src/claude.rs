@@ -131,12 +131,78 @@ pub fn detect_info(session: &ClaudeSession) -> SessionInfo {
 
     let (tasks, agents) = count_active_background(session);
 
+    let mut final_state = state.unwrap_or(SessionState::Active);
+
+    if matches!(final_state, SessionState::Idle)
+        && is_jsonl_stale(session, &jsonl_path)
+        && has_child_processes(session.pid)
+    {
+        final_state = SessionState::Active;
+    }
+
     SessionInfo {
-        state: state.unwrap_or(SessionState::Active),
+        state: final_state,
         mode: mode.unwrap_or(SessionMode::Default),
         active_tasks: tasks,
         active_agents: agents,
     }
+}
+
+fn is_jsonl_stale(session: &ClaudeSession, jsonl_path: &Path) -> bool {
+    let Some(jsonl_mtime) = jsonl_path.metadata().ok().and_then(|m| m.modified().ok()) else {
+        return false;
+    };
+
+    let age = std::time::SystemTime::now()
+        .duration_since(jsonl_mtime)
+        .ok()
+        .map_or(0, |d| d.as_secs());
+
+    if age < 60 {
+        return false;
+    }
+
+    let Some(home) = home_dir() else {
+        return false;
+    };
+    let encoded_cwd = encode_cwd(&session.cwd);
+    let project_dir = home.join(".claude").join("projects").join(&encoded_cwd);
+
+    let Ok(entries) = std::fs::read_dir(&project_dir) else {
+        return false;
+    };
+
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        path.extension().and_then(|e| e.to_str()) == Some("jsonl")
+            && path != *jsonl_path
+            && path
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .is_some_and(|t| {
+                    t.duration_since(jsonl_mtime)
+                        .ok()
+                        .is_some_and(|gap| gap.as_secs() > 30)
+                })
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn has_child_processes(pid: u32) -> bool {
+    let children_path = format!("/proc/{pid}/task/{pid}/children");
+    std::fs::read_to_string(&children_path)
+        .ok()
+        .is_some_and(|s| !s.trim().is_empty())
+}
+
+#[cfg(target_os = "macos")]
+fn has_child_processes(pid: u32) -> bool {
+    std::process::Command::new("pgrep")
+        .args(["-P", &pid.to_string()])
+        .output()
+        .ok()
+        .is_some_and(|o| !o.stdout.is_empty())
 }
 
 fn count_active_background(session: &ClaudeSession) -> (u32, u32) {
