@@ -55,32 +55,41 @@ pub fn detect_state(session: &ClaudeSession) -> SessionState {
         return SessionState::Active;
     };
 
-    let Some(last_line) = read_last_line(&jsonl_path) else {
+    let Some(tail) = read_tail_chunk(&jsonl_path) else {
         return SessionState::Active;
     };
 
-    let Ok(entry) = serde_json::from_str::<serde_json::Value>(&last_line) else {
-        return SessionState::Active;
-    };
+    for line in tail.lines().rev() {
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
 
-    let role = entry
-        .get("message")
-        .and_then(|m| m.get("role"))
-        .and_then(|r| r.as_str());
+        let entry_type = entry.get("type").and_then(|t| t.as_str());
+        if entry_type != Some("user") && entry_type != Some("assistant") {
+            continue;
+        }
 
-    if role == Some("user") {
-        return SessionState::Active;
+        let role = entry
+            .get("message")
+            .and_then(|m| m.get("role"))
+            .and_then(|r| r.as_str());
+
+        if role == Some("user") {
+            return SessionState::Active;
+        }
+
+        let stop_reason = entry
+            .get("message")
+            .and_then(|m| m.get("stop_reason"))
+            .and_then(|s| s.as_str());
+
+        return match stop_reason {
+            Some("end_turn") => SessionState::Idle,
+            _ => SessionState::Active,
+        };
     }
 
-    let stop_reason = entry
-        .get("message")
-        .and_then(|m| m.get("stop_reason"))
-        .and_then(|s| s.as_str());
-
-    match stop_reason {
-        Some("end_turn") => SessionState::Idle,
-        _ => SessionState::Active,
-    }
+    SessionState::Active
 }
 
 fn find_jsonl_path(session: &ClaudeSession) -> Option<PathBuf> {
@@ -96,7 +105,7 @@ fn encode_cwd(cwd: &str) -> String {
 }
 
 #[allow(clippy::verbose_file_reads)]
-fn read_last_line(path: &Path) -> Option<String> {
+fn read_tail_chunk(path: &Path) -> Option<String> {
     let mut file = std::fs::File::open(path).ok()?;
     let file_len = file.metadata().ok()?.len();
     if file_len == 0 {
@@ -110,7 +119,7 @@ fn read_last_line(path: &Path) -> Option<String> {
     let mut buf = String::new();
     let _ = file.read_to_string(&mut buf).ok()?;
 
-    buf.lines().last().map(ToOwned::to_owned)
+    Some(buf)
 }
 
 #[cfg(target_os = "linux")]
