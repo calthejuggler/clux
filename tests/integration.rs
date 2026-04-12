@@ -62,6 +62,28 @@ fn list_runs_without_crash() {
 }
 
 #[test]
+fn list_accepts_sort_flag() {
+    for sort in &[
+        "timestamp-desc",
+        "timestamp-asc",
+        "status",
+        "status-rev",
+        "mode",
+        "mode-rev",
+    ] {
+        let output = clux_bin()
+            .args(["list", "--sort", sort])
+            .output()
+            .expect("failed to execute");
+        assert!(
+            output.status.success(),
+            "list --sort {sort} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
 fn list_output_is_tab_separated() {
     let output = clux_bin().arg("list").output().expect("failed to execute");
     let stdout = String::from_utf8_lossy(&output.stdout);

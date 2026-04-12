@@ -3,6 +3,7 @@ pub(crate) mod history;
 pub(crate) mod process;
 pub(crate) mod tmux;
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 struct SessionCounts {
@@ -19,6 +20,41 @@ struct ListEntry {
     summary: String,
     cwd: String,
     session_name: String,
+    timestamp: u64,
+}
+
+#[derive(Clone, Copy, Default)]
+pub enum SortOrder {
+    #[default]
+    TimestampDesc,
+    TimestampAsc,
+    Status,
+    StatusRev,
+    Mode,
+    ModeRev,
+}
+
+impl SortOrder {
+    #[must_use]
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "timestamp-asc" => Self::TimestampAsc,
+            "status" => Self::Status,
+            "status-rev" => Self::StatusRev,
+            "mode" => Self::Mode,
+            "mode-rev" => Self::ModeRev,
+            _ => Self::TimestampDesc,
+        }
+    }
+
+    const fn tiebreak_timestamp(self) -> Ordering {
+        match self {
+            Self::StatusRev | Self::ModeRev => Ordering::Less,
+            Self::TimestampDesc | Self::TimestampAsc | Self::Status | Self::Mode => {
+                Ordering::Greater
+            }
+        }
+    }
 }
 
 const DEFAULT_FORMAT: &str = " | \u{1F916} {total} ({detail})";
@@ -76,29 +112,40 @@ fn command_exists(name: &str) -> bool {
         .is_ok_and(|exit_status| exit_status.success())
 }
 
-fn gather_list_entries() -> anyhow::Result<Vec<ListEntry>> {
+fn sort_entries(entries: &mut [ListEntry], order: SortOrder) {
+    entries.sort_by(|a, b| {
+        let primary = match order {
+            SortOrder::TimestampDesc => b.timestamp.cmp(&a.timestamp),
+            SortOrder::TimestampAsc => a.timestamp.cmp(&b.timestamp),
+            SortOrder::Status => b.state.cmp(a.state),
+            SortOrder::StatusRev => a.state.cmp(b.state),
+            SortOrder::Mode => a.mode.cmp(b.mode),
+            SortOrder::ModeRev => b.mode.cmp(a.mode),
+        };
+        if primary != Ordering::Equal {
+            return primary;
+        }
+        match order.tiebreak_timestamp() {
+            Ordering::Less => a.timestamp.cmp(&b.timestamp),
+            Ordering::Equal | Ordering::Greater => b.timestamp.cmp(&a.timestamp),
+        }
+    });
+}
+
+fn gather_list_entries(order: SortOrder) -> anyhow::Result<Vec<ListEntry>> {
     let sessions = claude::discover_sessions();
     let pane_map = tmux::list_pane_targets()?;
     let proc_tree = process::ProcessTree::build();
     let summaries = history::load_summaries(&sessions);
 
-    let mut with_panes: Vec<_> = sessions
+    let with_panes: Vec<_> = sessions
         .iter()
         .filter_map(|sess| {
             process::find_tmux_pane(sess.pid, &pane_map, &proc_tree).map(|pane| (sess, pane))
         })
         .collect();
-    with_panes.sort_by(|(session_a, _), (session_b, _)| {
-        let ts_a = summaries
-            .get(&session_a.pid)
-            .map_or(session_a.started_at, |smry| smry.timestamp);
-        let ts_b = summaries
-            .get(&session_b.pid)
-            .map_or(session_b.started_at, |smry| smry.timestamp);
-        ts_b.cmp(&ts_a)
-    });
 
-    let entries = with_panes
+    let mut entries: Vec<ListEntry> = with_panes
         .iter()
         .map(|(session, pane)| {
             let info = claude::detect_info(session);
@@ -115,6 +162,9 @@ fn gather_list_entries() -> anyhow::Result<Vec<ListEntry>> {
             let summary_text = summaries
                 .get(&session.pid)
                 .map_or("(no summary)", |smry| smry.display.as_str());
+            let timestamp = summaries
+                .get(&session.pid)
+                .map_or(session.started_at, |smry| smry.timestamp);
 
             ListEntry {
                 target: pane.target.clone(),
@@ -125,17 +175,31 @@ fn gather_list_entries() -> anyhow::Result<Vec<ListEntry>> {
                 summary: summary_text.to_owned(),
                 cwd: shorten_cwd(&session.cwd),
                 session_name: pane.session_name.clone(),
+                timestamp,
             }
         })
         .collect();
 
+    sort_entries(&mut entries, order);
+
     Ok(entries)
+}
+
+fn resolve_sort_order(cli_sort: Option<&str>) -> anyhow::Result<SortOrder> {
+    if let Some(s) = cli_sort {
+        return Ok(SortOrder::parse(s));
+    }
+    let tmux_sort = tmux::get_global_option("@clux-sort")?;
+    Ok(tmux_sort
+        .as_deref()
+        .map_or_else(SortOrder::default, SortOrder::parse))
 }
 
 /// # Errors
 /// Returns an error if tmux is not running or session discovery fails.
-pub fn run_list() -> anyhow::Result<()> {
-    let entries = gather_list_entries()?;
+pub fn run_list(sort: Option<&str>) -> anyhow::Result<()> {
+    let order = resolve_sort_order(sort)?;
+    let entries = gather_list_entries(order)?;
     for entry in &entries {
         println!(
             "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
@@ -210,8 +274,9 @@ pub fn run_select(filter: &str) -> anyhow::Result<()> {
 
 /// # Errors
 /// Returns an error if tmux is not running or the picker UI fails to open.
-pub fn run_pick() -> anyhow::Result<()> {
-    let entries = gather_list_entries()?;
+pub fn run_pick(sort: Option<&str>) -> anyhow::Result<()> {
+    let order = resolve_sort_order(sort)?;
+    let entries = gather_list_entries(order)?;
     if entries.is_empty() {
         tmux::display_message("clux: no Claude sessions found")?;
         return Ok(());
@@ -464,5 +529,204 @@ mod tests {
         let result = truncate_at("hellooo\u{1F916}world", 10);
         assert!(result.ends_with("..."));
         assert!(result.chars().count() <= 10);
+    }
+
+    fn make_entry(state: &'static str, mode: &'static str, timestamp: u64) -> ListEntry {
+        ListEntry {
+            target: String::new(),
+            state,
+            mode,
+            active_tasks: 0,
+            active_agents: 0,
+            summary: String::new(),
+            cwd: String::new(),
+            session_name: String::new(),
+            timestamp,
+        }
+    }
+
+    #[test]
+    fn sort_order_parse_all_variants() {
+        assert!(matches!(
+            SortOrder::parse("timestamp-desc"),
+            SortOrder::TimestampDesc
+        ));
+        assert!(matches!(
+            SortOrder::parse("timestamp-asc"),
+            SortOrder::TimestampAsc
+        ));
+        assert!(matches!(SortOrder::parse("status"), SortOrder::Status));
+        assert!(matches!(
+            SortOrder::parse("status-rev"),
+            SortOrder::StatusRev
+        ));
+        assert!(matches!(SortOrder::parse("mode"), SortOrder::Mode));
+        assert!(matches!(SortOrder::parse("mode-rev"), SortOrder::ModeRev));
+    }
+
+    #[test]
+    fn sort_order_parse_unknown_defaults_to_timestamp_desc() {
+        assert!(matches!(
+            SortOrder::parse("unknown"),
+            SortOrder::TimestampDesc
+        ));
+        assert!(matches!(SortOrder::parse(""), SortOrder::TimestampDesc));
+    }
+
+    #[test]
+    fn sort_entries_timestamp_desc() {
+        let mut entries = vec![
+            make_entry("idle", "default", 100),
+            make_entry("active", "default", 300),
+            make_entry("idle", "default", 200),
+        ];
+        sort_entries(&mut entries, SortOrder::TimestampDesc);
+        assert_eq!(entries[0].timestamp, 300);
+        assert_eq!(entries[1].timestamp, 200);
+        assert_eq!(entries[2].timestamp, 100);
+    }
+
+    #[test]
+    fn sort_entries_timestamp_asc() {
+        let mut entries = vec![
+            make_entry("idle", "default", 300),
+            make_entry("active", "default", 100),
+            make_entry("idle", "default", 200),
+        ];
+        sort_entries(&mut entries, SortOrder::TimestampAsc);
+        assert_eq!(entries[0].timestamp, 100);
+        assert_eq!(entries[1].timestamp, 200);
+        assert_eq!(entries[2].timestamp, 300);
+    }
+
+    #[test]
+    fn sort_entries_status_idle_first() {
+        let mut entries = vec![
+            make_entry("active", "default", 300),
+            make_entry("idle", "default", 100),
+            make_entry("active", "default", 200),
+        ];
+        sort_entries(&mut entries, SortOrder::Status);
+        assert_eq!(entries[0].state, "idle");
+        assert_eq!(entries[1].state, "active");
+        assert_eq!(entries[2].state, "active");
+    }
+
+    #[test]
+    fn sort_entries_status_tiebreaks_by_timestamp_desc() {
+        let mut entries = vec![
+            make_entry("active", "default", 100),
+            make_entry("active", "default", 300),
+            make_entry("active", "default", 200),
+        ];
+        sort_entries(&mut entries, SortOrder::Status);
+        assert_eq!(entries[0].timestamp, 300);
+        assert_eq!(entries[1].timestamp, 200);
+        assert_eq!(entries[2].timestamp, 100);
+    }
+
+    #[test]
+    fn sort_entries_status_rev_active_first() {
+        let mut entries = vec![
+            make_entry("active", "default", 200),
+            make_entry("idle", "default", 300),
+            make_entry("idle", "default", 100),
+        ];
+        sort_entries(&mut entries, SortOrder::StatusRev);
+        assert_eq!(entries[0].state, "active");
+        assert_eq!(entries[1].state, "idle");
+        assert_eq!(entries[2].state, "idle");
+    }
+
+    #[test]
+    fn sort_entries_mode_alphabetical() {
+        let mut entries = vec![
+            make_entry("active", "yolo", 100),
+            make_entry("active", "acceptEdits", 200),
+            make_entry("active", "default", 300),
+        ];
+        sort_entries(&mut entries, SortOrder::Mode);
+        assert_eq!(entries[0].mode, "acceptEdits");
+        assert_eq!(entries[1].mode, "default");
+        assert_eq!(entries[2].mode, "yolo");
+    }
+
+    #[test]
+    fn sort_entries_mode_rev() {
+        let mut entries = vec![
+            make_entry("active", "acceptEdits", 200),
+            make_entry("active", "yolo", 100),
+            make_entry("active", "default", 300),
+        ];
+        sort_entries(&mut entries, SortOrder::ModeRev);
+        assert_eq!(entries[0].mode, "yolo");
+        assert_eq!(entries[1].mode, "default");
+        assert_eq!(entries[2].mode, "acceptEdits");
+    }
+
+    #[test]
+    fn sort_entries_status_rev_tiebreaks_by_timestamp_asc() {
+        let mut entries = vec![
+            make_entry("idle", "default", 100),
+            make_entry("idle", "default", 300),
+            make_entry("idle", "default", 200),
+        ];
+        sort_entries(&mut entries, SortOrder::StatusRev);
+        assert_eq!(entries[0].timestamp, 100);
+        assert_eq!(entries[1].timestamp, 200);
+        assert_eq!(entries[2].timestamp, 300);
+    }
+
+    #[test]
+    fn sort_entries_mode_tiebreaks_by_timestamp_desc() {
+        let mut entries = vec![
+            make_entry("active", "default", 100),
+            make_entry("active", "default", 300),
+            make_entry("active", "default", 200),
+        ];
+        sort_entries(&mut entries, SortOrder::Mode);
+        assert_eq!(entries[0].timestamp, 300);
+        assert_eq!(entries[1].timestamp, 200);
+        assert_eq!(entries[2].timestamp, 100);
+    }
+
+    #[test]
+    fn sort_entries_mode_rev_tiebreaks_by_timestamp_asc() {
+        let mut entries = vec![
+            make_entry("idle", "yolo", 200),
+            make_entry("idle", "yolo", 100),
+            make_entry("idle", "yolo", 300),
+        ];
+        sort_entries(&mut entries, SortOrder::ModeRev);
+        assert_eq!(entries[0].timestamp, 100);
+        assert_eq!(entries[1].timestamp, 200);
+        assert_eq!(entries[2].timestamp, 300);
+    }
+
+    #[test]
+    fn sort_entries_timestamp_asc_tiebreaks_by_timestamp_desc() {
+        let mut entries = vec![
+            make_entry("active", "default", 300),
+            make_entry("idle", "default", 100),
+            make_entry("active", "default", 200),
+        ];
+        sort_entries(&mut entries, SortOrder::TimestampAsc);
+        assert_eq!(entries[0].timestamp, 100);
+        assert_eq!(entries[1].timestamp, 200);
+        assert_eq!(entries[2].timestamp, 300);
+    }
+
+    #[test]
+    fn sort_entries_empty() {
+        let mut entries: Vec<ListEntry> = vec![];
+        sort_entries(&mut entries, SortOrder::Status);
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn sort_entries_single() {
+        let mut entries = vec![make_entry("active", "default", 100)];
+        sort_entries(&mut entries, SortOrder::Mode);
+        assert_eq!(entries[0].timestamp, 100);
     }
 }

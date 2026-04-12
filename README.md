@@ -108,12 +108,35 @@ These options are set in your `.tmux.conf` and only apply when using clux as a t
 | `@clux-format` | ` \| {total} ({detail})` | Format string for session status |
 | `@clux-filter-binds` | _(none)_ | Comma-separated `key:filter` pairs for filtered pickers |
 | `@clux-fzf` | _(on)_ | Set to `off` to use tmux menus instead of fzf in the Claude picker |
+| `@clux-sort` | `timestamp-desc` | Sort order for `list` and `pick` commands |
 
 ### The Claude picker
 
-The Claude picker (`prefix + a`) gives you a focused view of just your Claude sessions. It shows state, mode, task count, sub-agent count, a summary of what Claude is doing, and the working directory. Sessions are sorted by most recent activity.
+The Claude picker (`prefix + a`) gives you a focused view of just your Claude sessions. It shows state, mode, task count, sub-agent count, a summary of what Claude is doing, and the working directory. Sessions are sorted by most recent activity by default.
 
 If you have `fzf-tmux` installed, it uses that for fuzzy finding. Otherwise it falls back to a tmux display-menu. You can force the menu with `set -g @clux-fzf 'off'`.
+
+### Sort order
+
+Both the Claude picker and `clux list` support configurable sort order. Set `@clux-sort` in your `.tmux.conf` or use the `--sort` CLI flag (which takes precedence).
+
+| Value | Description |
+|-------|-------------|
+| `timestamp-desc` | Most recent activity first (default) |
+| `timestamp-asc` | Oldest activity first |
+| `status` | Idle first, then active |
+| `status-rev` | Active first, then idle |
+| `mode` | Alphabetical by mode |
+| `mode-rev` | Reverse alphabetical by mode |
+
+Ties are broken by timestamp descending (newest first), except for reversed sorts (`status-rev`, `mode-rev`) which use timestamp ascending.
+
+```sh
+set -g @clux-sort 'status'
+# or via CLI
+clux list --sort status
+clux pick --sort mode-rev
+```
 
 ### Format placeholders
 
@@ -131,9 +154,10 @@ set -g @clux-key 's'
 set -g @clux-claude-key 'a'
 set -g @clux-format ' | {active}/{total}'
 set -g @clux-filter-binds 'S:has-claude,A:active,I:idle'
+set -g @clux-sort 'status'
 ```
 
-This binds `prefix + s` to the full session picker, `prefix + a` to the Claude picker, `prefix + S` to show only sessions with Claude, `prefix + A` for active sessions, and `prefix + I` for idle sessions.
+This binds `prefix + s` to the full session picker, `prefix + a` to the Claude picker, `prefix + S` to show only sessions with Claude, `prefix + A` for active sessions, and `prefix + I` for idle sessions. The Claude picker and list command sort idle sessions first.
 
 ## Roadmap
 
@@ -144,6 +168,7 @@ This binds `prefix + s` to the full session picker, `prefix + a` to the Claude p
 - [x] fzf integration
 - [x] Standalone CLI with proper `--help`
 - [x] Published on crates.io
+- [x] Configurable sort order
 - [ ] Other coding agent softwares
 
 Check the [open issues](https://github.com/calthejuggler/clux/issues) for more.
