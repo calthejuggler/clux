@@ -36,23 +36,6 @@ pub fn list_pane_targets() -> Result<HashMap<u32, PaneInfo>, Box<dyn std::error:
     Ok(map)
 }
 
-pub fn list_panes() -> Result<HashMap<u32, String>, Box<dyn std::error::Error>> {
-    let output = Command::new("tmux")
-        .args(["list-panes", "-a", "-F", "#{pane_pid} #{session_name}"])
-        .output()?;
-
-    let mut map = HashMap::new();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-        if let Some((pid_str, session_name)) = line.split_once(' ')
-            && let Ok(pid) = pid_str.parse::<u32>()
-        {
-            let _ = map.insert(pid, session_name.to_owned());
-        }
-    }
-    Ok(map)
-}
-
 pub fn list_sessions() -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let output = Command::new("tmux")
         .args(["list-sessions", "-F", "#{session_name}"])

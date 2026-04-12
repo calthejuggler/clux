@@ -73,23 +73,20 @@ fn shorten_cwd(cwd: &str) -> String {
 fn run_list() -> Result<(), Box<dyn std::error::Error>> {
     let sessions = claude::discover_sessions();
     let pane_map = tmux::list_pane_targets()?;
+    let proc_tree = process::ProcessTree::build();
     let summaries = history::load_summaries(&sessions);
 
-    let mut sorted_sessions: Vec<_> = sessions
+    let mut with_panes: Vec<_> = sessions
         .iter()
-        .filter(|s| process::find_tmux_pane(s.pid, &pane_map).is_some())
+        .filter_map(|s| process::find_tmux_pane(s.pid, &pane_map, &proc_tree).map(|p| (s, p)))
         .collect();
-    sorted_sessions.sort_by(|a, b| {
-        let ts_a = summaries.get(&a.pid).map_or(0, |s| s.timestamp);
-        let ts_b = summaries.get(&b.pid).map_or(0, |s| s.timestamp);
+    with_panes.sort_by(|(session_a, _), (session_b, _)| {
+        let ts_a = summaries.get(&session_a.pid).map_or(0, |s| s.timestamp);
+        let ts_b = summaries.get(&session_b.pid).map_or(0, |s| s.timestamp);
         ts_b.cmp(&ts_a)
     });
 
-    for session in &sorted_sessions {
-        let Some(pane) = process::find_tmux_pane(session.pid, &pane_map) else {
-            continue;
-        };
-
+    for (session, pane) in &with_panes {
         let info = claude::detect_info(session);
         let state_str = match info.state {
             claude::SessionState::Active => "active",
@@ -127,7 +124,8 @@ fn run_list() -> Result<(), Box<dyn std::error::Error>> {
 
 fn run_update(filter: &str) -> Result<(), Box<dyn std::error::Error>> {
     let sessions = claude::discover_sessions();
-    let pane_map = tmux::list_panes()?;
+    let pane_map = tmux::list_pane_targets()?;
+    let proc_tree = process::ProcessTree::build();
     let all_tmux_sessions = tmux::list_sessions()?;
     let custom_format = tmux::get_global_option("@clux-format")?;
     let format_str = custom_format.as_deref().unwrap_or(DEFAULT_FORMAT);
@@ -135,10 +133,10 @@ fn run_update(filter: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut counts: HashMap<String, SessionCounts> = HashMap::new();
 
     for session in &sessions {
-        if let Some(tmux_session) = process::find_tmux_session(session.pid, &pane_map) {
+        if let Some(pane) = process::find_tmux_pane(session.pid, &pane_map, &proc_tree) {
             let info = claude::detect_info(session);
             let entry = counts
-                .entry(tmux_session)
+                .entry(pane.session_name.clone())
                 .or_insert(SessionCounts { active: 0, idle: 0 });
             match info.state {
                 claude::SessionState::Active => entry.active += 1,
