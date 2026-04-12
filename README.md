@@ -12,9 +12,16 @@ Written in Rust.
 
 ## What it does
 
-clux looks at your `~/.claude/sessions/` directory, figures out which Claude Code sessions are running, and maps them to your tmux panes by walking the process tree. It then shows you whether each session is active (waiting for input) or idle (Claude finished responding) right in your tmux session picker.
+clux looks at your `~/.claude/sessions/` directory, figures out which Claude Code sessions are running, and maps them to your tmux panes by walking the process tree. It then shows you the status of each session right in your tmux session picker.
 
-When you hit `prefix + s` to switch sessions, you can see which ones have Claude running in them without having to check each one manually.
+For each session, clux can tell you:
+
+- **State** -- active (waiting for input) or idle (Claude finished responding)
+- **Mode** -- default, acceptEdits, yolo, or plan
+- **Background work** -- how many tasks and sub-agents are running
+- **Summary** -- what Claude is currently working on
+
+When you hit `prefix + s` to switch sessions, you can see which ones have Claude running in them without having to check each one manually. There's also a dedicated Claude picker (`prefix + a` by default) that shows only sessions with Claude, sorted by most recent activity.
 
 ## Getting started
 
@@ -37,8 +44,16 @@ Then press `prefix + I` to install.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `@clux-key` | `s` | Key to bind the session picker (after prefix) |
+| `@clux-claude-key` | `a` | Key to bind the Claude-only picker (after prefix) |
 | `@clux-format` | ` \| 🤖 {total} ({detail})` | Format string for session status |
 | `@clux-filter-binds` | _(none)_ | Comma-separated `key:filter` pairs for filtered pickers |
+| `@clux-fzf` | _(on)_ | Set to `off` to use tmux menus instead of fzf in the Claude picker |
+
+#### The Claude picker
+
+The Claude picker (`prefix + a`) gives you a focused view of just your Claude sessions. It shows state, mode, task count, sub-agent count, a summary of what Claude is doing, and the working directory. Sessions are sorted by most recent activity.
+
+If you have `fzf-tmux` installed, it uses that for fuzzy finding. Otherwise it falls back to a tmux display-menu. You can force the menu with `set -g @clux-fzf 'off'`.
 
 #### Format placeholders
 
@@ -61,11 +76,12 @@ Examples:
 
 ```sh
 set -g @clux-key 's'
+set -g @clux-claude-key 'a'
 set -g @clux-format ' | 🤖 {active}/{total}'
 set -g @clux-filter-binds 'S:has-claude,A:active,I:idle'
 ```
 
-This binds `prefix + s` to the full session picker, `prefix + S` to show only sessions with Claude, `prefix + A` for active sessions, and `prefix + I` for idle sessions.
+This binds `prefix + s` to the full session picker, `prefix + a` to the Claude picker, `prefix + S` to show only sessions with Claude, `prefix + A` for active sessions, and `prefix + I` for idle sessions.
 
 ### Install manually
 
@@ -83,6 +99,8 @@ Pre-built binaries are available for Linux and macOS (both x86_64 and aarch64). 
 - [x] Configurable keybinding
 - [x] Customizable status bar format
 - [x] Session filtering options
+- [x] Claude picker with mode, tasks, and sub-agent info
+- [x] fzf integration
 - [ ] Other coding agent softwares
 
 Check the [open issues](https://github.com/calthejuggler/clux/issues) for more.
