@@ -16,8 +16,12 @@ pub fn list_pane_targets() -> Result<HashMap<u32, PaneInfo>, Box<dyn std::error:
         ])
         .output()?;
 
-    let mut map = HashMap::new();
     let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_pane_targets(&stdout))
+}
+
+pub fn parse_pane_targets(stdout: &str) -> HashMap<u32, PaneInfo> {
+    let mut map = HashMap::new();
     for line in stdout.lines() {
         let mut parts = line.splitn(3, '\t');
         if let (Some(pid_str), Some(target), Some(session_name)) =
@@ -33,7 +37,7 @@ pub fn list_pane_targets() -> Result<HashMap<u32, PaneInfo>, Box<dyn std::error:
             );
         }
     }
-    Ok(map)
+    map
 }
 
 pub fn list_sessions() -> Result<Vec<String>, Box<dyn std::error::Error>> {
@@ -42,7 +46,11 @@ pub fn list_sessions() -> Result<Vec<String>, Box<dyn std::error::Error>> {
         .output()?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(stdout.lines().map(ToOwned::to_owned).collect())
+    Ok(parse_sessions(&stdout))
+}
+
+pub fn parse_sessions(stdout: &str) -> Vec<String> {
+    stdout.lines().map(ToOwned::to_owned).collect()
 }
 
 pub fn set_session_option(
@@ -130,4 +138,79 @@ pub fn display_menu(
     }
     let _ = Command::new("tmux").args(&args).output()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_pane_targets_empty() {
+        let map = parse_pane_targets("");
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn parse_pane_targets_single_pane() {
+        let stdout = "12345\tmain:0.0\tmain\n";
+        let map = parse_pane_targets(stdout);
+        assert_eq!(map.len(), 1);
+        let pane = map.get(&12345).expect("pane");
+        assert_eq!(pane.session_name, "main");
+        assert_eq!(pane.target, "main:0.0");
+    }
+
+    #[test]
+    fn parse_pane_targets_multiple_panes() {
+        let stdout = "100\twork:0.0\twork\n200\twork:0.1\twork\n300\tdev:1.0\tdev\n";
+        let map = parse_pane_targets(stdout);
+        assert_eq!(map.len(), 3);
+        assert_eq!(map.get(&100).expect("pane").target, "work:0.0");
+        assert_eq!(map.get(&200).expect("pane").target, "work:0.1");
+        assert_eq!(map.get(&300).expect("pane").session_name, "dev");
+    }
+
+    #[test]
+    fn parse_pane_targets_invalid_pid_skipped() {
+        let stdout = "notapid\tmain:0.0\tmain\n12345\twork:0.0\twork\n";
+        let map = parse_pane_targets(stdout);
+        assert_eq!(map.len(), 1);
+        assert!(map.contains_key(&12345));
+    }
+
+    #[test]
+    fn parse_pane_targets_incomplete_line_skipped() {
+        let stdout = "12345\tmain:0.0\n67890\twork:0.0\twork\n";
+        let map = parse_pane_targets(stdout);
+        assert_eq!(map.len(), 1);
+        assert!(map.contains_key(&67890));
+    }
+
+    #[test]
+    fn parse_pane_targets_duplicate_pid_last_wins() {
+        let stdout = "100\tfirst:0.0\tfirst\n100\tsecond:1.0\tsecond\n";
+        let map = parse_pane_targets(stdout);
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get(&100).expect("pane").session_name, "second");
+    }
+
+    #[test]
+    fn parse_sessions_empty() {
+        let sessions = parse_sessions("");
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn parse_sessions_multiple() {
+        let stdout = "main\nwork\ndev\n";
+        let sessions = parse_sessions(stdout);
+        assert_eq!(sessions, vec!["main", "work", "dev"]);
+    }
+
+    #[test]
+    fn parse_sessions_no_trailing_newline() {
+        let stdout = "main\nwork";
+        let sessions = parse_sessions(stdout);
+        assert_eq!(sessions, vec!["main", "work"]);
+    }
 }

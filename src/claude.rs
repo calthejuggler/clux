@@ -70,6 +70,18 @@ pub fn discover_sessions_in(sessions_dir: &Path, check_alive: bool) -> Vec<Claud
 }
 
 pub fn detect_info(session: &ClaudeSession) -> SessionInfo {
+    let Some(home) = home_dir() else {
+        return SessionInfo {
+            state: SessionState::Active,
+            mode: SessionMode::Default,
+            active_tasks: 0,
+            active_agents: 0,
+        };
+    };
+    detect_info_in(session, &home)
+}
+
+pub fn detect_info_in(session: &ClaudeSession, home: &Path) -> SessionInfo {
     let default = SessionInfo {
         state: SessionState::Active,
         mode: SessionMode::Default,
@@ -77,7 +89,7 @@ pub fn detect_info(session: &ClaudeSession) -> SessionInfo {
         active_agents: 0,
     };
 
-    let Some(jsonl_path) = find_jsonl_path(session) else {
+    let Some(jsonl_path) = find_jsonl_path_in(session, home) else {
         return default;
     };
 
@@ -347,11 +359,6 @@ fn collect_open_files(parent_pid: u32) -> std::collections::HashSet<PathBuf> {
     files
 }
 
-fn find_jsonl_path(session: &ClaudeSession) -> Option<PathBuf> {
-    let home = home_dir()?;
-    find_jsonl_path_in(session, &home)
-}
-
 pub fn find_jsonl_path_in(session: &ClaudeSession, home: &Path) -> Option<PathBuf> {
     let encoded_cwd = encode_cwd(&session.cwd);
     let project_dir = home.join(".claude").join("projects").join(&encoded_cwd);
@@ -609,6 +616,101 @@ mod tests {
 {"type":"user","message":{"role":"user"}}"#;
         let (_, mode) = parse_jsonl_tail(tail);
         assert!(matches!(mode, SessionMode::Default));
+    }
+
+    fn make_session(session_id: &str, cwd: &str) -> ClaudeSession {
+        ClaudeSession {
+            pid: 1,
+            session_id: session_id.to_owned(),
+            cwd: cwd.to_owned(),
+            started_at: 0,
+        }
+    }
+
+    fn setup_jsonl(home: &Path, cwd: &str, session_id: &str, content: &str) {
+        let encoded = encode_cwd(cwd);
+        let project_dir = home.join(".claude").join("projects").join(&encoded);
+        std::fs::create_dir_all(&project_dir).expect("mkdir");
+        std::fs::write(project_dir.join(format!("{session_id}.jsonl")), content).expect("write");
+    }
+
+    #[test]
+    fn detect_info_no_jsonl_returns_active() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = make_session("no-file", "/home/user");
+        let info = detect_info_in(&session, dir.path());
+        assert!(matches!(info.state, SessionState::Active));
+        assert!(matches!(info.mode, SessionMode::Default));
+        assert_eq!(info.active_tasks, 0);
+        assert_eq!(info.active_agents, 0);
+    }
+
+    #[test]
+    fn detect_info_idle_session() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = make_session("sess-idle", "/home/user");
+        let content =
+            r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn"}}"#;
+        setup_jsonl(dir.path(), "/home/user", "sess-idle", content);
+
+        let info = detect_info_in(&session, dir.path());
+        assert!(matches!(info.state, SessionState::Idle));
+    }
+
+    #[test]
+    fn detect_info_active_user_message() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = make_session("sess-active", "/home/user");
+        let content = r#"{"type":"user","message":{"role":"user"}}"#;
+        setup_jsonl(dir.path(), "/home/user", "sess-active", content);
+
+        let info = detect_info_in(&session, dir.path());
+        assert!(matches!(info.state, SessionState::Active));
+    }
+
+    #[test]
+    fn detect_info_active_no_stop_reason() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = make_session("sess-nostop", "/home/user");
+        let content = r#"{"type":"assistant","message":{"role":"assistant"}}"#;
+        setup_jsonl(dir.path(), "/home/user", "sess-nostop", content);
+
+        let info = detect_info_in(&session, dir.path());
+        assert!(matches!(info.state, SessionState::Active));
+    }
+
+    #[test]
+    fn detect_info_plan_mode() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = make_session("sess-plan", "/home/user");
+        let content =
+            "{\"permissionMode\":\"plan\"}\n{\"type\":\"user\",\"message\":{\"role\":\"user\"}}";
+        setup_jsonl(dir.path(), "/home/user", "sess-plan", content);
+
+        let info = detect_info_in(&session, dir.path());
+        assert!(matches!(info.mode, SessionMode::Plan));
+    }
+
+    #[test]
+    fn detect_info_bypass_mode() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = make_session("sess-yolo", "/home/user");
+        let content = "{\"permissionMode\":\"bypassPermissions\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"stop_reason\":\"end_turn\"}}";
+        setup_jsonl(dir.path(), "/home/user", "sess-yolo", content);
+
+        let info = detect_info_in(&session, dir.path());
+        assert!(matches!(info.mode, SessionMode::BypassPermissions));
+        assert!(matches!(info.state, SessionState::Idle));
+    }
+
+    #[test]
+    fn detect_info_empty_jsonl_returns_active() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = make_session("sess-empty", "/home/user");
+        setup_jsonl(dir.path(), "/home/user", "sess-empty", "");
+
+        let info = detect_info_in(&session, dir.path());
+        assert!(matches!(info.state, SessionState::Active));
     }
 
     #[test]
