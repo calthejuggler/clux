@@ -213,4 +213,30 @@ mod tests {
         let sessions = parse_sessions(stdout);
         assert_eq!(sessions, vec!["main", "work"]);
     }
+
+    #[test]
+    fn parse_pane_targets_session_name_with_spaces() {
+        let stdout = "555\tmy session:0.0\tmy session\n";
+        let map = parse_pane_targets(stdout);
+        assert_eq!(map.len(), 1);
+        let pane = map.get(&555).expect("pane");
+        assert_eq!(pane.session_name, "my session");
+        assert_eq!(pane.target, "my session:0.0");
+    }
+
+    #[test]
+    fn parse_pane_targets_session_name_with_special_chars() {
+        let stdout = "777\tdev-2.0:1.3\tdev-2.0\n";
+        let map = parse_pane_targets(stdout);
+        assert_eq!(map.len(), 1);
+        let pane = map.get(&777).expect("pane");
+        assert_eq!(pane.session_name, "dev-2.0");
+        assert_eq!(pane.target, "dev-2.0:1.3");
+    }
+
+    #[test]
+    fn parse_sessions_single() {
+        let sessions = parse_sessions("main\n");
+        assert_eq!(sessions, vec!["main"]);
+    }
 }

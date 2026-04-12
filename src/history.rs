@@ -340,6 +340,157 @@ not json at all"#;
     }
 
     #[test]
+    fn load_summaries_from_multiple_sessions() {
+        let sessions = vec![
+            ClaudeSession {
+                pid: 100,
+                session_id: "sess-1".to_owned(),
+                cwd: "/project-a".to_owned(),
+                started_at: 1700000000,
+            },
+            ClaudeSession {
+                pid: 200,
+                session_id: "sess-2".to_owned(),
+                cwd: "/project-b".to_owned(),
+                started_at: 1700000000,
+            },
+        ];
+
+        let lines = vec![
+            serde_json::json!({
+                "display": "Task A",
+                "sessionId": "sess-1",
+                "project": "/project-a",
+                "timestamp": 1700000100_u64
+            }),
+            serde_json::json!({
+                "display": "Task B",
+                "sessionId": "sess-2",
+                "project": "/project-b",
+                "timestamp": 1700000200_u64
+            }),
+        ];
+
+        let contents: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let result = load_summaries_from(&sessions, &contents);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result.get(&100).expect("pid 100").display, "Task A");
+        assert_eq!(result.get(&200).expect("pid 200").display, "Task B");
+    }
+
+    #[test]
+    fn load_summaries_from_last_display_wins() {
+        let sessions = vec![ClaudeSession {
+            pid: 100,
+            session_id: "sess-1".to_owned(),
+            cwd: "/project".to_owned(),
+            started_at: 1700000000,
+        }];
+
+        let lines = vec![
+            serde_json::json!({
+                "display": "First prompt",
+                "sessionId": "sess-1",
+                "project": "/project",
+                "timestamp": 1700000100_u64
+            }),
+            serde_json::json!({
+                "display": "Second prompt",
+                "sessionId": "sess-1",
+                "project": "/project",
+                "timestamp": 1700000200_u64
+            }),
+        ];
+
+        let contents: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let result = load_summaries_from(&sessions, &contents);
+        let summary = result.get(&100).expect("pid 100");
+        assert_eq!(summary.display, "Second prompt");
+        assert_eq!(summary.timestamp, 1700000200);
+    }
+
+    #[test]
+    fn follow_chain_different_project_does_not_chain() {
+        let mut map = HashMap::new();
+        let _ = map.insert(
+            "sess-1".to_owned(),
+            SessionSummary {
+                last_display: "/clear".to_owned(),
+                last_timestamp: 100,
+                first_timestamp: 50,
+                project: "/project-a".to_owned(),
+                session_changed: true,
+            },
+        );
+        let _ = map.insert(
+            "sess-2".to_owned(),
+            SessionSummary {
+                last_display: "Work in project B".to_owned(),
+                last_timestamp: 200,
+                first_timestamp: 150,
+                project: "/project-b".to_owned(),
+                session_changed: false,
+            },
+        );
+        let live = std::collections::HashSet::from(["sess-1".to_owned()]);
+
+        let result = follow_chain("sess-1", "/project-a", &map, &live);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn load_summaries_deduplicates_chain_targets() {
+        let sessions = vec![
+            ClaudeSession {
+                pid: 100,
+                session_id: "sess-1".to_owned(),
+                cwd: "/project".to_owned(),
+                started_at: 1700000000,
+            },
+            ClaudeSession {
+                pid: 200,
+                session_id: "sess-2".to_owned(),
+                cwd: "/project".to_owned(),
+                started_at: 1700000000,
+            },
+        ];
+
+        let lines = vec![
+            serde_json::json!({
+                "display": "Only entry",
+                "sessionId": "sess-1",
+                "project": "/project",
+                "timestamp": 1700000100_u64
+            }),
+            serde_json::json!({
+                "display": "Only entry for sess-2",
+                "sessionId": "sess-2",
+                "project": "/project",
+                "timestamp": 1700000200_u64
+            }),
+        ];
+
+        let contents: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let result = load_summaries_from(&sessions, &contents);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
     fn follow_chain_max_depth_terminates() {
         let mut map = HashMap::new();
         for idx in 0..25 {

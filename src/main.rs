@@ -452,6 +452,26 @@ mod tests {
     }
 
     #[test]
+    fn format_info_zero_counts() {
+        let counts = SessionCounts { active: 0, idle: 0 };
+        let result = format_info(DEFAULT_FORMAT, &counts);
+        assert!(result.contains("0"));
+        assert!(result.contains("0 active"));
+    }
+
+    #[test]
+    fn command_exists_known_good() {
+        assert!(command_exists("sh"));
+    }
+
+    #[test]
+    fn command_exists_known_bad() {
+        assert!(!command_exists(
+            "this_command_definitely_does_not_exist_xyz"
+        ));
+    }
+
+    #[test]
     fn truncate_at_short() {
         assert_eq!(truncate_at("hello", 10), "hello");
     }

@@ -704,6 +704,65 @@ mod tests {
     }
 
     #[test]
+    fn detect_info_accept_edits_mode() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = make_session("sess-edits", "/home/user");
+        let content = "{\"permissionMode\":\"acceptEdits\"}\n{\"type\":\"user\",\"message\":{\"role\":\"user\"}}";
+        setup_jsonl(dir.path(), "/home/user", "sess-edits", content);
+
+        let info = detect_info_in(&session, dir.path());
+        assert!(matches!(info.mode, SessionMode::AcceptEdits));
+    }
+
+    #[test]
+    fn parse_jsonl_tail_mixed_garbage_and_valid() {
+        let tail =
+            "not json at all\n{invalid json}\n{\"type\":\"user\",\"message\":{\"role\":\"user\"}}";
+        let (state, _) = parse_jsonl_tail(tail);
+        assert!(matches!(state, SessionState::Active));
+    }
+
+    #[test]
+    fn parse_jsonl_tail_only_garbage() {
+        let tail = "garbage line 1\n{broken\nmore garbage";
+        let (state, mode) = parse_jsonl_tail(tail);
+        assert!(matches!(state, SessionState::Active));
+        assert!(matches!(mode, SessionMode::Default));
+    }
+
+    #[test]
+    fn parse_jsonl_tail_multiple_messages_uses_last() {
+        let tail = "{\"type\":\"user\",\"message\":{\"role\":\"user\"}}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"stop_reason\":\"end_turn\"}}";
+        let (state, _) = parse_jsonl_tail(tail);
+        assert!(matches!(state, SessionState::Idle));
+    }
+
+    #[test]
+    fn parse_jsonl_tail_mode_on_different_line_than_state() {
+        let tail = "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"stop_reason\":\"end_turn\"}}\n{\"permissionMode\":\"plan\"}";
+        let (state, mode) = parse_jsonl_tail(tail);
+        assert!(matches!(state, SessionState::Idle));
+        assert!(matches!(mode, SessionMode::Plan));
+    }
+
+    #[test]
+    fn discover_sessions_multiple_valid() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for i in 1..=3 {
+            let json = serde_json::json!({
+                "pid": 99990 + i,
+                "sessionId": format!("sess-{i}"),
+                "cwd": "/home/user/project",
+                "startedAt": 1700000000_u64
+            });
+            std::fs::write(dir.path().join(format!("sess-{i}.json")), json.to_string())
+                .expect("write");
+        }
+        let sessions = discover_sessions_in(dir.path(), false);
+        assert_eq!(sessions.len(), 3);
+    }
+
+    #[test]
     fn detect_info_empty_jsonl_returns_active() {
         let dir = tempfile::tempdir().expect("tempdir");
         let session = make_session("sess-empty", "/home/user");
