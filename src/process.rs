@@ -83,3 +83,45 @@ pub fn find_tmux_pane<'map>(
     }
     None
 }
+
+#[cfg(test)]
+#[cfg(target_os = "linux")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_tmux_pane_direct_parent() {
+        let mut pane_map = HashMap::new();
+        let current_pid = std::process::id();
+        let ppid = get_ppid(current_pid).expect("should have a parent");
+
+        let _ = pane_map.insert(
+            ppid,
+            PaneInfo {
+                session_name: "test".to_owned(),
+                target: "test:0.0".to_owned(),
+            },
+        );
+        let tree = ProcessTree::build();
+
+        let result = find_tmux_pane(current_pid, &pane_map, &tree);
+        assert!(result.is_some());
+        assert_eq!(result.expect("pane").session_name, "test");
+    }
+
+    #[test]
+    fn find_tmux_pane_not_found() {
+        let pane_map = HashMap::new();
+        let tree = ProcessTree::build();
+        let result = find_tmux_pane(std::process::id(), &pane_map, &tree);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_tmux_pane_stops_at_init() {
+        let pane_map = HashMap::new();
+        let tree = ProcessTree::build();
+        let result = find_tmux_pane(1, &pane_map, &tree);
+        assert!(result.is_none());
+    }
+}

@@ -31,13 +31,17 @@ pub struct SessionInfo {
 }
 
 pub fn discover_sessions() -> Vec<ClaudeSession> {
-    let mut sessions = Vec::new();
     let sessions_dir = match home_dir().map(|h| h.join(".claude").join("sessions")) {
         Some(d) if d.is_dir() => d,
-        _ => return sessions,
+        _ => return Vec::new(),
     };
+    discover_sessions_in(&sessions_dir, true)
+}
 
-    let Ok(entries) = std::fs::read_dir(&sessions_dir) else {
+pub fn discover_sessions_in(sessions_dir: &Path, check_alive: bool) -> Vec<ClaudeSession> {
+    let mut sessions = Vec::new();
+
+    let Ok(entries) = std::fs::read_dir(sessions_dir) else {
         return sessions;
     };
 
@@ -55,7 +59,7 @@ pub fn discover_sessions() -> Vec<ClaudeSession> {
             continue;
         };
 
-        if !is_pid_alive(session.pid) {
+        if check_alive && !is_pid_alive(session.pid) {
             continue;
         }
 
@@ -81,6 +85,28 @@ pub fn detect_info(session: &ClaudeSession) -> SessionInfo {
         return default;
     };
 
+    let (state, mode) = parse_jsonl_tail(&tail);
+
+    let (tasks, agents) = count_active_background(session);
+
+    let mut final_state = state;
+
+    if matches!(final_state, SessionState::Idle)
+        && is_jsonl_stale(session, &jsonl_path)
+        && has_child_processes(session.pid)
+    {
+        final_state = SessionState::Active;
+    }
+
+    SessionInfo {
+        state: final_state,
+        mode,
+        active_tasks: tasks,
+        active_agents: agents,
+    }
+}
+
+pub fn parse_jsonl_tail(tail: &str) -> (SessionState, SessionMode) {
     let mut state = None;
     let mut mode = None;
 
@@ -129,23 +155,10 @@ pub fn detect_info(session: &ClaudeSession) -> SessionInfo {
         }
     }
 
-    let (tasks, agents) = count_active_background(session);
-
-    let mut final_state = state.unwrap_or(SessionState::Active);
-
-    if matches!(final_state, SessionState::Idle)
-        && is_jsonl_stale(session, &jsonl_path)
-        && has_child_processes(session.pid)
-    {
-        final_state = SessionState::Active;
-    }
-
-    SessionInfo {
-        state: final_state,
-        mode: mode.unwrap_or(SessionMode::Default),
-        active_tasks: tasks,
-        active_agents: agents,
-    }
+    (
+        state.unwrap_or(SessionState::Active),
+        mode.unwrap_or(SessionMode::Default),
+    )
 }
 
 fn is_jsonl_stale(session: &ClaudeSession, jsonl_path: &Path) -> bool {
@@ -336,18 +349,22 @@ fn collect_open_files(parent_pid: u32) -> std::collections::HashSet<PathBuf> {
 
 fn find_jsonl_path(session: &ClaudeSession) -> Option<PathBuf> {
     let home = home_dir()?;
+    find_jsonl_path_in(session, &home)
+}
+
+pub fn find_jsonl_path_in(session: &ClaudeSession, home: &Path) -> Option<PathBuf> {
     let encoded_cwd = encode_cwd(&session.cwd);
     let project_dir = home.join(".claude").join("projects").join(&encoded_cwd);
     let jsonl = project_dir.join(format!("{}.jsonl", session.session_id));
     jsonl.exists().then_some(jsonl)
 }
 
-fn encode_cwd(cwd: &str) -> String {
+pub fn encode_cwd(cwd: &str) -> String {
     cwd.replace('/', "-")
 }
 
 #[allow(clippy::verbose_file_reads)]
-fn read_tail_chunk(path: &Path) -> Option<String> {
+pub fn read_tail_chunk(path: &Path) -> Option<String> {
     let mut file = std::fs::File::open(path).ok()?;
     let file_len = file.metadata().ok()?.len();
     if file_len == 0 {
@@ -410,4 +427,222 @@ fn current_uid() -> u32 {
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(501)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_cwd_basic() {
+        assert_eq!(encode_cwd("/home/user/project"), "-home-user-project");
+    }
+
+    #[test]
+    fn encode_cwd_root() {
+        assert_eq!(encode_cwd("/"), "-");
+    }
+
+    #[test]
+    fn encode_cwd_trailing_slash() {
+        assert_eq!(encode_cwd("/home/user/"), "-home-user-");
+    }
+
+    #[test]
+    fn discover_sessions_empty_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sessions = discover_sessions_in(dir.path(), false);
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn discover_sessions_invalid_json() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("bad.json"), "not json").expect("write");
+        let sessions = discover_sessions_in(dir.path(), false);
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn discover_sessions_non_json_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("notes.txt"), "hello").expect("write");
+        std::fs::write(dir.path().join("data.log"), "log line").expect("write");
+        let sessions = discover_sessions_in(dir.path(), false);
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn discover_sessions_valid_no_pid_check() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let json = serde_json::json!({
+            "pid": 99999,
+            "sessionId": "abc-123",
+            "cwd": "/home/user/project",
+            "startedAt": 1700000000_u64
+        });
+        std::fs::write(dir.path().join("sess.json"), json.to_string()).expect("write");
+        let sessions = discover_sessions_in(dir.path(), false);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions.first().expect("session").session_id, "abc-123");
+        assert_eq!(sessions.first().expect("session").cwd, "/home/user/project");
+    }
+
+    #[test]
+    fn discover_sessions_skips_dead_pids() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let json = serde_json::json!({
+            "pid": 4294967295_u64,
+            "sessionId": "dead-session",
+            "cwd": "/tmp",
+            "startedAt": 1700000000_u64
+        });
+        std::fs::write(dir.path().join("dead.json"), json.to_string()).expect("write");
+        let sessions = discover_sessions_in(dir.path(), true);
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn read_tail_chunk_small_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("small.jsonl");
+        std::fs::write(&path, "line1\nline2\nline3\n").expect("write");
+        let result = read_tail_chunk(&path);
+        assert!(result.is_some());
+        let content = result.expect("content");
+        assert!(content.contains("line1"));
+        assert!(content.contains("line3"));
+    }
+
+    #[test]
+    fn read_tail_chunk_empty_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("empty.jsonl");
+        std::fs::write(&path, "").expect("write");
+        assert!(read_tail_chunk(&path).is_none());
+    }
+
+    #[test]
+    fn read_tail_chunk_large_file_drops_partial_line() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("large.jsonl");
+        let line = "a".repeat(1000);
+        let mut content = String::new();
+        for _ in 0..100 {
+            content.push_str(&line);
+            content.push('\n');
+        }
+        std::fs::write(&path, &content).expect("write");
+        let result = read_tail_chunk(&path);
+        assert!(result.is_some());
+        let tail = result.expect("tail");
+        for l in tail.lines() {
+            assert!(l.len() == 1000 || l.is_empty());
+        }
+    }
+
+    #[test]
+    fn parse_jsonl_tail_user_message_last() {
+        let tail = r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn"}}
+{"type":"user","message":{"role":"user"}}"#;
+        let (state, _) = parse_jsonl_tail(tail);
+        assert!(matches!(state, SessionState::Active));
+    }
+
+    #[test]
+    fn parse_jsonl_tail_assistant_end_turn() {
+        let tail =
+            r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn"}}"#;
+        let (state, _) = parse_jsonl_tail(tail);
+        assert!(matches!(state, SessionState::Idle));
+    }
+
+    #[test]
+    fn parse_jsonl_tail_assistant_no_stop_reason() {
+        let tail = r#"{"type":"assistant","message":{"role":"assistant"}}"#;
+        let (state, _) = parse_jsonl_tail(tail);
+        assert!(matches!(state, SessionState::Active));
+    }
+
+    #[test]
+    fn parse_jsonl_tail_empty() {
+        let (state, mode) = parse_jsonl_tail("");
+        assert!(matches!(state, SessionState::Active));
+        assert!(matches!(mode, SessionMode::Default));
+    }
+
+    #[test]
+    fn parse_jsonl_tail_permission_plan() {
+        let tail = r#"{"permissionMode":"plan"}
+{"type":"user","message":{"role":"user"}}"#;
+        let (_, mode) = parse_jsonl_tail(tail);
+        assert!(matches!(mode, SessionMode::Plan));
+    }
+
+    #[test]
+    fn parse_jsonl_tail_permission_bypass() {
+        let tail = r#"{"permissionMode":"bypassPermissions"}
+{"type":"user","message":{"role":"user"}}"#;
+        let (_, mode) = parse_jsonl_tail(tail);
+        assert!(matches!(mode, SessionMode::BypassPermissions));
+    }
+
+    #[test]
+    fn parse_jsonl_tail_permission_accept_edits() {
+        let tail = r#"{"permissionMode":"acceptEdits"}
+{"type":"user","message":{"role":"user"}}"#;
+        let (_, mode) = parse_jsonl_tail(tail);
+        assert!(matches!(mode, SessionMode::AcceptEdits));
+    }
+
+    #[test]
+    fn parse_jsonl_tail_permission_default() {
+        let tail = r#"{"permissionMode":"default"}
+{"type":"user","message":{"role":"user"}}"#;
+        let (_, mode) = parse_jsonl_tail(tail);
+        assert!(matches!(mode, SessionMode::Default));
+    }
+
+    #[test]
+    fn parse_jsonl_tail_permission_unknown() {
+        let tail = r#"{"permissionMode":"somethingNew"}
+{"type":"user","message":{"role":"user"}}"#;
+        let (_, mode) = parse_jsonl_tail(tail);
+        assert!(matches!(mode, SessionMode::Default));
+    }
+
+    #[test]
+    fn find_jsonl_path_exists() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let projects_dir = dir
+            .path()
+            .join(".claude")
+            .join("projects")
+            .join("-home-user");
+        std::fs::create_dir_all(&projects_dir).expect("mkdir");
+        std::fs::write(projects_dir.join("sess-1.jsonl"), "data").expect("write");
+
+        let session = ClaudeSession {
+            pid: 1,
+            session_id: "sess-1".to_owned(),
+            cwd: "/home/user".to_owned(),
+            started_at: 0,
+        };
+
+        let result = find_jsonl_path_in(&session, dir.path());
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn find_jsonl_path_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = ClaudeSession {
+            pid: 1,
+            session_id: "nonexistent".to_owned(),
+            cwd: "/home/user".to_owned(),
+            started_at: 0,
+        };
+        let result = find_jsonl_path_in(&session, dir.path());
+        assert!(result.is_none());
+    }
 }

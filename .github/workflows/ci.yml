@@ -29,6 +29,14 @@ jobs:
           components: rustfmt
       - run: cargo fmt -- --check
 
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test
+
   build:
     name: Build
     runs-on: ubuntu-latest

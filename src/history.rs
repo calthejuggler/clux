@@ -13,12 +13,12 @@ struct HistoryEntry {
     timestamp: Option<u64>,
 }
 
-struct SessionSummary {
-    last_display: String,
-    last_timestamp: u64,
-    first_timestamp: u64,
-    project: String,
-    session_changed: bool,
+pub struct SessionSummary {
+    pub last_display: String,
+    pub last_timestamp: u64,
+    pub first_timestamp: u64,
+    pub project: String,
+    pub session_changed: bool,
 }
 
 pub struct Summary {
@@ -26,18 +26,21 @@ pub struct Summary {
     pub timestamp: u64,
 }
 
-struct ChainResult {
-    summary: Summary,
-    depth: usize,
-    target_sid: String,
+pub struct ChainResult {
+    pub summary: Summary,
+    pub depth: usize,
+    pub target_sid: String,
 }
 
 pub fn load_summaries(sessions: &[ClaudeSession]) -> HashMap<u32, Summary> {
-    let mut result = HashMap::new();
-
     let Some(contents) = history_path().and_then(|p| std::fs::read_to_string(p).ok()) else {
-        return result;
+        return HashMap::new();
     };
+    load_summaries_from(sessions, &contents)
+}
+
+pub fn load_summaries_from(sessions: &[ClaudeSession], contents: &str) -> HashMap<u32, Summary> {
+    let mut result = HashMap::new();
 
     let mut by_session_id: HashMap<String, SessionSummary> = HashMap::new();
 
@@ -107,7 +110,7 @@ pub fn load_summaries(sessions: &[ClaudeSession]) -> HashMap<u32, Summary> {
     result
 }
 
-fn follow_chain(
+pub fn follow_chain(
     start_sid: &str,
     cwd: &str,
     map: &HashMap<String, SessionSummary>,
@@ -146,7 +149,7 @@ fn follow_chain(
     None
 }
 
-fn truncate_display(text: &str, max_chars: usize) -> String {
+pub fn truncate_display(text: &str, max_chars: usize) -> String {
     let trimmed = text.lines().next().unwrap_or(text);
     let char_count = trimmed.chars().count();
     if char_count <= max_chars {
@@ -161,4 +164,199 @@ fn history_path() -> Option<PathBuf> {
     let home = std::env::var("HOME").ok()?;
     let path = PathBuf::from(home).join(".claude").join("history.jsonl");
     path.exists().then_some(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_display_short() {
+        assert_eq!(truncate_display("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_display_long() {
+        let result = truncate_display("this is a very long description", 10);
+        assert!(result.ends_with("..."));
+        assert!(result.chars().count() <= 13);
+    }
+
+    #[test]
+    fn truncate_display_multiline() {
+        let result = truncate_display("first line\nsecond line\nthird line", 80);
+        assert_eq!(result, "first line");
+    }
+
+    #[test]
+    fn load_summaries_from_empty() {
+        let sessions: Vec<ClaudeSession> = Vec::new();
+        let result = load_summaries_from(&sessions, "");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn load_summaries_from_basic() {
+        let sessions = vec![ClaudeSession {
+            pid: 100,
+            session_id: "sess-1".to_owned(),
+            cwd: "/home/user/project".to_owned(),
+            started_at: 1700000000,
+        }];
+
+        let history = serde_json::json!({
+            "display": "Fix the login bug",
+            "sessionId": "sess-1",
+            "project": "/home/user/project",
+            "timestamp": 1700000100_u64
+        });
+
+        let result = load_summaries_from(&sessions, &history.to_string());
+        assert_eq!(result.len(), 1);
+        let summary = result.get(&100).expect("summary for pid 100");
+        assert_eq!(summary.display, "Fix the login bug");
+        assert_eq!(summary.timestamp, 1700000100);
+    }
+
+    #[test]
+    fn load_summaries_from_clear_follows_chain() {
+        let sessions = vec![ClaudeSession {
+            pid: 100,
+            session_id: "sess-1".to_owned(),
+            cwd: "/home/user/project".to_owned(),
+            started_at: 1700000000,
+        }];
+
+        let lines = vec![
+            serde_json::json!({
+                "display": "First task",
+                "sessionId": "sess-1",
+                "project": "/home/user/project",
+                "timestamp": 1700000100_u64
+            }),
+            serde_json::json!({
+                "display": "/clear",
+                "sessionId": "sess-1",
+                "project": "/home/user/project",
+                "timestamp": 1700000200_u64
+            }),
+            serde_json::json!({
+                "display": "Second task after clear",
+                "sessionId": "sess-2",
+                "project": "/home/user/project",
+                "timestamp": 1700000300_u64
+            }),
+        ];
+
+        let contents: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let result = load_summaries_from(&sessions, &contents);
+        assert_eq!(result.len(), 1);
+        let summary = result.get(&100).expect("summary for pid 100");
+        assert_eq!(summary.display, "Second task after clear");
+    }
+
+    #[test]
+    fn load_summaries_from_missing_fields_skipped() {
+        let sessions = vec![ClaudeSession {
+            pid: 100,
+            session_id: "sess-1".to_owned(),
+            cwd: "/tmp".to_owned(),
+            started_at: 0,
+        }];
+
+        let contents = r#"{"display":"hello"}
+{"sessionId":"sess-1"}
+not json at all"#;
+
+        let result = load_summaries_from(&sessions, contents);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn follow_chain_no_clear() {
+        let mut map = HashMap::new();
+        let _ = map.insert(
+            "sess-1".to_owned(),
+            SessionSummary {
+                last_display: "Working on feature".to_owned(),
+                last_timestamp: 100,
+                first_timestamp: 50,
+                project: "/project".to_owned(),
+                session_changed: false,
+            },
+        );
+        let live = std::collections::HashSet::from(["sess-1".to_owned()]);
+
+        let result = follow_chain("sess-1", "/project", &map, &live);
+        assert!(result.is_some());
+        let chain = result.expect("chain");
+        assert_eq!(chain.summary.display, "Working on feature");
+        assert_eq!(chain.depth, 0);
+    }
+
+    #[test]
+    fn follow_chain_with_clear() {
+        let mut map = HashMap::new();
+        let _ = map.insert(
+            "sess-1".to_owned(),
+            SessionSummary {
+                last_display: "/clear".to_owned(),
+                last_timestamp: 100,
+                first_timestamp: 50,
+                project: "/project".to_owned(),
+                session_changed: true,
+            },
+        );
+        let _ = map.insert(
+            "sess-2".to_owned(),
+            SessionSummary {
+                last_display: "New work".to_owned(),
+                last_timestamp: 200,
+                first_timestamp: 150,
+                project: "/project".to_owned(),
+                session_changed: false,
+            },
+        );
+        let live = std::collections::HashSet::from(["sess-1".to_owned()]);
+
+        let result = follow_chain("sess-1", "/project", &map, &live);
+        assert!(result.is_some());
+        let chain = result.expect("chain");
+        assert_eq!(chain.summary.display, "New work");
+        assert_eq!(chain.depth, 1);
+    }
+
+    #[test]
+    fn follow_chain_missing_session() {
+        let map = HashMap::new();
+        let live = std::collections::HashSet::new();
+        let result = follow_chain("nonexistent", "/project", &map, &live);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn follow_chain_max_depth_terminates() {
+        let mut map = HashMap::new();
+        for idx in 0..25 {
+            let _ = map.insert(
+                format!("sess-{idx}"),
+                SessionSummary {
+                    last_display: "/clear".to_owned(),
+                    last_timestamp: u64::try_from(idx * 100 + 50).unwrap_or(0),
+                    first_timestamp: u64::try_from(idx * 100).unwrap_or(0),
+                    project: "/project".to_owned(),
+                    session_changed: true,
+                },
+            );
+        }
+        let live = std::collections::HashSet::from(["sess-0".to_owned()]);
+
+        let result = follow_chain("sess-0", "/project", &map, &live);
+        assert!(result.is_none());
+    }
 }

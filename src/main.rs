@@ -344,3 +344,133 @@ fn pick_with_menu(entries: &[ListEntry]) -> Result<(), Box<dyn std::error::Error
     tmux::display_menu("Claude Sessions", &items)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_info_all_active() {
+        let counts = SessionCounts { active: 3, idle: 0 };
+        let result = format_info(DEFAULT_FORMAT, &counts);
+        assert!(result.contains("3"));
+        assert!(result.contains("3 active"));
+    }
+
+    #[test]
+    fn format_info_all_idle() {
+        let counts = SessionCounts { active: 0, idle: 2 };
+        let result = format_info(DEFAULT_FORMAT, &counts);
+        assert!(result.contains("2"));
+        assert!(result.contains("2 idle"));
+    }
+
+    #[test]
+    fn format_info_mixed() {
+        let counts = SessionCounts { active: 1, idle: 2 };
+        let result = format_info(DEFAULT_FORMAT, &counts);
+        assert!(result.contains("3"));
+        assert!(result.contains("1 active, 2 idle"));
+    }
+
+    #[test]
+    fn format_info_custom_template() {
+        let counts = SessionCounts { active: 2, idle: 3 };
+        let result = format_info("T={total} A={active} I={idle} D={detail}", &counts);
+        assert_eq!(result, "T=5 A=2 I=3 D=2 active, 3 idle");
+    }
+
+    #[test]
+    fn is_visible_all_filter_always_true() {
+        assert!(is_visible("all", None));
+        assert!(is_visible(
+            "all",
+            Some(&SessionCounts { active: 0, idle: 0 })
+        ));
+    }
+
+    #[test]
+    fn is_visible_has_claude_some() {
+        assert!(is_visible(
+            "has-claude",
+            Some(&SessionCounts { active: 0, idle: 0 })
+        ));
+    }
+
+    #[test]
+    fn is_visible_has_claude_none() {
+        assert!(!is_visible("has-claude", None));
+    }
+
+    #[test]
+    fn is_visible_active_filter() {
+        assert!(is_visible(
+            "active",
+            Some(&SessionCounts { active: 1, idle: 0 })
+        ));
+        assert!(!is_visible(
+            "active",
+            Some(&SessionCounts { active: 0, idle: 1 })
+        ));
+        assert!(!is_visible("active", None));
+    }
+
+    #[test]
+    fn is_visible_idle_filter() {
+        assert!(is_visible(
+            "idle",
+            Some(&SessionCounts { active: 0, idle: 1 })
+        ));
+        assert!(!is_visible(
+            "idle",
+            Some(&SessionCounts { active: 1, idle: 0 })
+        ));
+        assert!(!is_visible("idle", None));
+    }
+
+    #[test]
+    fn is_visible_unknown_filter_defaults_true() {
+        assert!(is_visible("unknown", None));
+    }
+
+    #[test]
+    fn shorten_cwd_with_home() {
+        let home = std::env::var("HOME").expect("HOME must be set");
+        let path = format!("{home}/projects/test");
+        assert_eq!(shorten_cwd(&path), "~/projects/test");
+    }
+
+    #[test]
+    fn shorten_cwd_without_home() {
+        assert_eq!(shorten_cwd("/tmp/other"), "/tmp/other");
+    }
+
+    #[test]
+    fn shorten_cwd_exact_home() {
+        let home = std::env::var("HOME").expect("HOME must be set");
+        assert_eq!(shorten_cwd(&home), "~");
+    }
+
+    #[test]
+    fn truncate_at_short() {
+        assert_eq!(truncate_at("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_at_exact() {
+        assert_eq!(truncate_at("hello", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_at_long() {
+        let result = truncate_at("hello world!", 8);
+        assert_eq!(result, "hello...");
+    }
+
+    #[test]
+    fn truncate_at_unicode() {
+        let result = truncate_at("hellooo\u{1F916}world", 10);
+        assert!(result.ends_with("..."));
+        assert!(result.chars().count() <= 10);
+    }
+}
