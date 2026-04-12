@@ -232,19 +232,28 @@ fn descendant_pids(pid: u32) -> Vec<u32> {
 }
 
 #[cfg(target_os = "macos")]
-fn collect_open_files(parent_pid: u32) -> std::collections::HashSet<PathBuf> {
+fn descendant_pids(pid: u32) -> Vec<u32> {
     let Ok(output) = std::process::Command::new("pgrep")
-        .args(["-P", &parent_pid.to_string()])
+        .args(["-P", &pid.to_string()])
         .output()
     else {
-        return std::collections::HashSet::new();
+        return Vec::new();
     };
+    let mut pids = Vec::new();
+    for pid_str in String::from_utf8_lossy(&output.stdout).split_whitespace() {
+        if let Ok(child) = pid_str.parse::<u32>() {
+            pids.push(child);
+            pids.extend(descendant_pids(child));
+        }
+    }
+    pids
+}
+
+#[cfg(target_os = "macos")]
+fn collect_open_files(parent_pid: u32) -> std::collections::HashSet<PathBuf> {
+    let child_pids = descendant_pids(parent_pid);
     let mut files = std::collections::HashSet::new();
-    let pids: Vec<u32> = String::from_utf8_lossy(&output.stdout)
-        .split_whitespace()
-        .filter_map(|s| s.parse().ok())
-        .collect();
-    for pid in pids {
+    for pid in child_pids {
         if let Ok(lsof) = std::process::Command::new("lsof")
             .args(["-p", &pid.to_string(), "-Fn"])
             .output()
@@ -285,6 +294,12 @@ fn read_tail_chunk(path: &Path) -> Option<String> {
 
     let mut buf = String::new();
     let _ = file.read_to_string(&mut buf).ok()?;
+
+    if start > 0
+        && let Some(newline_pos) = buf.find('\n')
+    {
+        let _ = buf.drain(..=newline_pos);
+    }
 
     Some(buf)
 }

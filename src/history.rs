@@ -116,16 +116,13 @@ pub fn load_summaries(sessions: &[ClaudeSession]) -> HashMap<u32, Summary> {
     result
 }
 
-fn truncate_display(text: &str, max_len: usize) -> String {
+fn truncate_display(text: &str, max_chars: usize) -> String {
     let trimmed = text.lines().next().unwrap_or(text);
-    if trimmed.len() <= max_len {
+    let char_count = trimmed.chars().count();
+    if char_count <= max_chars {
         return trimmed.to_owned();
     }
-    let mut end = max_len;
-    while !trimmed.is_char_boundary(end) {
-        end -= 1;
-    }
-    let mut result = trimmed.get(..end).unwrap_or(trimmed).to_owned();
+    let mut result: String = trimmed.chars().take(max_chars).collect();
     result.push_str("...");
     result
 }
