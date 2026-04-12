@@ -23,9 +23,9 @@ fn no_args_prints_usage() {
 }
 
 #[test]
-fn no_args_exits_with_code_1() {
+fn no_args_exits_with_code_2() {
     let output = clux_bin().output().expect("failed to execute");
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
 }
 
 #[test]
@@ -43,12 +43,12 @@ fn unknown_command_prints_usage() {
 }
 
 #[test]
-fn unknown_command_exits_with_code_1() {
+fn unknown_command_exits_with_code_2() {
     let output = clux_bin()
         .arg("foobar")
         .output()
         .expect("failed to execute");
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(2));
 }
 
 #[test]

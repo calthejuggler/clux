@@ -6,7 +6,7 @@ pub struct PaneInfo {
     pub target: String,
 }
 
-pub fn list_pane_targets() -> Result<HashMap<u32, PaneInfo>, Box<dyn std::error::Error>> {
+pub fn list_pane_targets() -> anyhow::Result<HashMap<u32, PaneInfo>> {
     let output = Command::new("tmux")
         .args([
             "list-panes",
@@ -40,7 +40,7 @@ pub fn parse_pane_targets(stdout: &str) -> HashMap<u32, PaneInfo> {
     map
 }
 
-pub fn list_sessions() -> Result<Vec<String>, Box<dyn std::error::Error>> {
+pub fn list_sessions() -> anyhow::Result<Vec<String>> {
     let output = Command::new("tmux")
         .args(["list-sessions", "-F", "#{session_name}"])
         .output()?;
@@ -53,11 +53,7 @@ pub fn parse_sessions(stdout: &str) -> Vec<String> {
     stdout.lines().map(ToOwned::to_owned).collect()
 }
 
-pub fn set_session_option(
-    session: &str,
-    key: &str,
-    value: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn set_session_option(session: &str, key: &str, value: &str) -> anyhow::Result<()> {
     let target = format!("{session}:");
     let _ = Command::new("tmux")
         .args(["set", "-t", &target, key, value])
@@ -65,7 +61,7 @@ pub fn set_session_option(
     Ok(())
 }
 
-pub fn unset_session_option(session: &str, key: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn unset_session_option(session: &str, key: &str) -> anyhow::Result<()> {
     let target = format!("{session}:");
     let _ = Command::new("tmux")
         .args(["set", "-t", &target, "-u", key])
@@ -73,7 +69,7 @@ pub fn unset_session_option(session: &str, key: &str) -> Result<(), Box<dyn std:
     Ok(())
 }
 
-pub fn get_global_option(key: &str) -> Result<Option<String>, Box<dyn std::error::Error>> {
+pub fn get_global_option(key: &str) -> anyhow::Result<Option<String>> {
     let output = Command::new("tmux")
         .args(["show-option", "-gqv", key])
         .output()?;
@@ -85,7 +81,7 @@ pub fn get_global_option(key: &str) -> Result<Option<String>, Box<dyn std::error
     }
 }
 
-pub fn choose_tree(filter: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn choose_tree(filter: &str) -> anyhow::Result<()> {
     let format_str = concat!(
         "#{?pane_format,",
         "#{pane_current_command} \"#{pane_title}\",",
@@ -109,7 +105,7 @@ pub fn choose_tree(filter: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub fn switch_client(target: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn switch_client(target: &str) -> anyhow::Result<()> {
     let _ = Command::new("tmux")
         .args(["switch-client", "-t", target])
         .output()?;
@@ -119,17 +115,14 @@ pub fn switch_client(target: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub fn display_message(msg: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn display_message(msg: &str) -> anyhow::Result<()> {
     let _ = Command::new("tmux")
         .args(["display-message", msg])
         .output()?;
     Ok(())
 }
 
-pub fn display_menu(
-    title: &str,
-    items: &[(String, String)],
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn display_menu(title: &str, items: &[(String, String)]) -> anyhow::Result<()> {
     let mut args: Vec<String> = vec!["display-menu".to_owned(), "-T".to_owned(), title.to_owned()];
     for (label, target) in items {
         args.push(label.clone());

@@ -76,7 +76,7 @@ fn command_exists(name: &str) -> bool {
         .is_ok_and(|exit_status| exit_status.success())
 }
 
-fn gather_list_entries() -> Result<Vec<ListEntry>, Box<dyn std::error::Error>> {
+fn gather_list_entries() -> anyhow::Result<Vec<ListEntry>> {
     let sessions = claude::discover_sessions();
     let pane_map = tmux::list_pane_targets()?;
     let proc_tree = process::ProcessTree::build();
@@ -134,7 +134,7 @@ fn gather_list_entries() -> Result<Vec<ListEntry>, Box<dyn std::error::Error>> {
 
 /// # Errors
 /// Returns an error if tmux is not running or session discovery fails.
-pub fn run_list() -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_list() -> anyhow::Result<()> {
     let entries = gather_list_entries()?;
     for entry in &entries {
         println!(
@@ -154,7 +154,7 @@ pub fn run_list() -> Result<(), Box<dyn std::error::Error>> {
 
 /// # Errors
 /// Returns an error if tmux is not running or session options cannot be set.
-pub fn run_update(filter: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_update(filter: &str) -> anyhow::Result<()> {
     let sessions = claude::discover_sessions();
     let pane_map = tmux::list_pane_targets()?;
     let proc_tree = process::ProcessTree::build();
@@ -202,7 +202,7 @@ pub fn run_update(filter: &str) -> Result<(), Box<dyn std::error::Error>> {
 
 /// # Errors
 /// Returns an error if tmux is not running or the choose-tree UI fails to open.
-pub fn run_select(filter: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_select(filter: &str) -> anyhow::Result<()> {
     run_update(filter)?;
     tmux::choose_tree(filter)?;
     Ok(())
@@ -210,7 +210,7 @@ pub fn run_select(filter: &str) -> Result<(), Box<dyn std::error::Error>> {
 
 /// # Errors
 /// Returns an error if tmux is not running or the picker UI fails to open.
-pub fn run_pick() -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_pick() -> anyhow::Result<()> {
     let entries = gather_list_entries()?;
     if entries.is_empty() {
         tmux::display_message("clux: no Claude sessions found")?;
@@ -229,7 +229,7 @@ pub fn run_pick() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn pick_with_fzf(entries: &[ListEntry]) -> Result<(), Box<dyn std::error::Error>> {
+fn pick_with_fzf(entries: &[ListEntry]) -> anyhow::Result<()> {
     use std::io::Write as _;
 
     let header = format!(
@@ -295,7 +295,7 @@ fn pick_with_fzf(entries: &[ListEntry]) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
-fn pick_with_menu(entries: &[ListEntry]) -> Result<(), Box<dyn std::error::Error>> {
+fn pick_with_menu(entries: &[ListEntry]) -> anyhow::Result<()> {
     let items: Vec<(String, String)> = entries
         .iter()
         .map(|entry| {

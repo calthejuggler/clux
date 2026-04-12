@@ -1,35 +1,38 @@
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    match args.get(1).map(String::as_str) {
-        Some("update") => {
-            let filter = args.get(2).map_or("all", String::as_str);
-            if let Err(err) = clux::run_update(filter) {
-                eprintln!("clux: {err}");
-                std::process::exit(1);
-            }
-        }
-        Some("list") => {
-            if let Err(err) = clux::run_list() {
-                eprintln!("clux: {err}");
-                std::process::exit(1);
-            }
-        }
-        Some("select") => {
-            let filter = args.get(2).map_or("all", String::as_str);
-            if let Err(err) = clux::run_select(filter) {
-                eprintln!("clux: {err}");
-                std::process::exit(1);
-            }
-        }
-        Some("pick") => {
-            if let Err(err) = clux::run_pick() {
-                eprintln!("clux: {err}");
-                std::process::exit(1);
-            }
-        }
-        _ => {
-            eprintln!("Usage: clux <update [filter]|list|select [filter]|pick>");
-            std::process::exit(1);
-        }
+use clap::{Parser, Subcommand};
+
+#[derive(Parser)]
+#[command(version, about = "Monitor Claude Code sessions in tmux")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Update tmux session variables with Claude Code status
+    Update {
+        /// Filter: all, has-claude, active, idle
+        #[arg(default_value = "all")]
+        filter: String,
+    },
+    /// List Claude Code sessions (tab-separated)
+    List,
+    /// Open tmux choose-tree with Claude Code status
+    Select {
+        /// Filter: all, has-claude, active, idle
+        #[arg(default_value = "all")]
+        filter: String,
+    },
+    /// Open a Claude-only session picker (fzf or tmux menu)
+    Pick,
+}
+
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    match &cli.command {
+        Command::Update { filter } => clux::run_update(filter),
+        Command::List => clux::run_list(),
+        Command::Select { filter } => clux::run_select(filter),
+        Command::Pick => clux::run_pick(),
     }
 }
