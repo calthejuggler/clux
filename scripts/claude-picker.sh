@@ -61,7 +61,9 @@ pick_with_menu() {
     tmux display-menu -T "Claude Sessions" "${args[@]}"
 }
 
-if command -v fzf-tmux &>/dev/null; then
+USE_FZF=$(tmux show-option -gqv @clux-fzf)
+
+if [[ "${USE_FZF}" != "off" ]] && command -v fzf-tmux &>/dev/null; then
     pick_with_fzf
 else
     pick_with_menu
