@@ -73,7 +73,7 @@ fn shorten_cwd(cwd: &str) -> String {
 fn run_list() -> Result<(), Box<dyn std::error::Error>> {
     let sessions = claude::discover_sessions();
     let pane_map = tmux::list_pane_targets()?;
-    let first_messages = history::load_first_messages();
+    let summaries = history::load_summaries(&sessions);
 
     for session in &sessions {
         let Some(pane) = process::find_tmux_pane(session.pid, &pane_map) else {
@@ -93,8 +93,8 @@ fn run_list() -> Result<(), Box<dyn std::error::Error>> {
             claude::SessionMode::Plan => "plan",
         };
 
-        let summary = first_messages
-            .get(&session.session_id)
+        let summary = summaries
+            .get(&session.pid)
             .map_or("(no summary)", String::as_str);
 
         let cwd = shorten_cwd(&session.cwd);

@@ -8,6 +8,7 @@ pub struct ClaudeSession {
     pub pid: u32,
     pub session_id: String,
     pub cwd: String,
+    pub started_at: u64,
 }
 
 pub enum SessionState {
