@@ -23,6 +23,10 @@ For each session, clux can tell you:
 
 When you hit `prefix + s` to switch sessions, you can see which ones have Claude running in them without having to check each one manually. There's also a dedicated Claude picker (`prefix + a` by default) that shows only sessions with Claude, sorted by most recent activity.
 
+![Session picker with Claude status](assets/session-picker.png)
+
+![Claude picker with fzf](assets/claude-picker.png)
+
 ## Getting started
 
 You need [tmux](https://github.com/tmux/tmux) and [Claude Code](https://claude.ai/code) installed.
