@@ -20,7 +20,12 @@ struct SessionSummary {
     project: String,
 }
 
-pub fn load_summaries(sessions: &[ClaudeSession]) -> HashMap<u32, String> {
+pub struct Summary {
+    pub display: String,
+    pub timestamp: u64,
+}
+
+pub fn load_summaries(sessions: &[ClaudeSession]) -> HashMap<u32, Summary> {
     let mut result = HashMap::new();
 
     let Some(contents) = history_path().and_then(|p| std::fs::read_to_string(p).ok()) else {
@@ -98,7 +103,13 @@ pub fn load_summaries(sessions: &[ClaudeSession]) -> HashMap<u32, String> {
         }
 
         if let Some(display) = best_display {
-            let _ = result.insert(session.pid, display);
+            let _ = result.insert(
+                session.pid,
+                Summary {
+                    display,
+                    timestamp: best_ts,
+                },
+            );
         }
     }
 

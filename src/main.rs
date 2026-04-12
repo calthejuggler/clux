@@ -75,7 +75,17 @@ fn run_list() -> Result<(), Box<dyn std::error::Error>> {
     let pane_map = tmux::list_pane_targets()?;
     let summaries = history::load_summaries(&sessions);
 
-    for session in &sessions {
+    let mut sorted_sessions: Vec<_> = sessions
+        .iter()
+        .filter(|s| process::find_tmux_pane(s.pid, &pane_map).is_some())
+        .collect();
+    sorted_sessions.sort_by(|a, b| {
+        let ts_a = summaries.get(&a.pid).map_or(0, |s| s.timestamp);
+        let ts_b = summaries.get(&b.pid).map_or(0, |s| s.timestamp);
+        ts_b.cmp(&ts_a)
+    });
+
+    for session in &sorted_sessions {
         let Some(pane) = process::find_tmux_pane(session.pid, &pane_map) else {
             continue;
         };
@@ -95,7 +105,7 @@ fn run_list() -> Result<(), Box<dyn std::error::Error>> {
 
         let summary = summaries
             .get(&session.pid)
-            .map_or("(no summary)", String::as_str);
+            .map_or("(no summary)", |s| s.display.as_str());
 
         let cwd = shorten_cwd(&session.cwd);
 
