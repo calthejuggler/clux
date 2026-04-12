@@ -76,3 +76,58 @@ pub fn get_global_option(key: &str) -> Result<Option<String>, Box<dyn std::error
         Ok(Some(value))
     }
 }
+
+pub fn choose_tree(filter: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let format_str = concat!(
+        "#{?pane_format,",
+        "#{pane_current_command} \"#{pane_title}\",",
+        "#{?window_format,",
+        "#{window_name}#{window_flags} (#{window_panes} panes)",
+        "#{?#{==:#{window_panes},1}, \"#{pane_title}\",},",
+        "#{session_windows} windows",
+        "#{?session_grouped, (group #{session_group}: #{session_group_list}),}",
+        "#{?session_attached, (attached),}",
+        "#{@clux_info}",
+        "}}",
+    );
+
+    let mut args = vec!["choose-tree", "-s", "-Z"];
+    if filter != "all" {
+        args.extend(["-f", "#{@clux_visible}"]);
+    }
+    args.extend(["-F", format_str]);
+
+    let _ = Command::new("tmux").args(args).output()?;
+    Ok(())
+}
+
+pub fn switch_client(target: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let _ = Command::new("tmux")
+        .args(["switch-client", "-t", target])
+        .output()?;
+    let _ = Command::new("tmux")
+        .args(["select-pane", "-t", target])
+        .output()?;
+    Ok(())
+}
+
+pub fn display_message(msg: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let _ = Command::new("tmux")
+        .args(["display-message", msg])
+        .output()?;
+    Ok(())
+}
+
+pub fn display_menu(
+    title: &str,
+    items: &[(String, String)],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut args: Vec<String> = vec!["display-menu".to_owned(), "-T".to_owned(), title.to_owned()];
+    for (label, target) in items {
+        args.push(label.clone());
+        args.push(String::new());
+        args.push(format!("switch-client -t '{target}'"));
+    }
+    let _ = Command::new("tmux").args(&args).output()?;
+    Ok(())
+}

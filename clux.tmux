@@ -10,11 +10,13 @@ CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KEY=$(tmux show-option -gqv @clux-key)
 KEY="${KEY:-s}"
 
-tmux bind-key "${KEY}" run-shell "${CURRENT_DIR}/scripts/session-select.sh"
+BINARY="${CURRENT_DIR}/bin/clux"
+
+tmux bind-key "${KEY}" run-shell "${BINARY} select"
 
 CLAUDE_KEY=$(tmux show-option -gqv @clux-claude-key)
 CLAUDE_KEY="${CLAUDE_KEY:-a}"
-tmux bind-key "${CLAUDE_KEY}" run-shell "${CURRENT_DIR}/scripts/claude-picker.sh"
+tmux bind-key "${CLAUDE_KEY}" run-shell "${BINARY} pick"
 
 FILTER_BINDS=$(tmux show-option -gqv @clux-filter-binds)
 if [[ -n "${FILTER_BINDS}" ]]; then
@@ -25,7 +27,7 @@ if [[ -n "${FILTER_BINDS}" ]]; then
         bind_key=$(echo "${bind_key}" | xargs)
         filter=$(echo "${filter}" | xargs)
         if [[ -n "${bind_key}" && -n "${filter}" ]]; then
-            tmux bind-key "${bind_key}" run-shell "${CURRENT_DIR}/scripts/session-select.sh ${filter}"
+            tmux bind-key "${bind_key}" run-shell "${BINARY} select ${filter}"
         fi
     done
 fi

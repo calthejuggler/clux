@@ -18,11 +18,18 @@ struct SessionSummary {
     last_timestamp: u64,
     first_timestamp: u64,
     project: String,
+    session_changed: bool,
 }
 
 pub struct Summary {
     pub display: String,
     pub timestamp: u64,
+}
+
+struct ChainResult {
+    summary: Summary,
+    depth: usize,
+    target_sid: String,
 }
 
 pub fn load_summaries(sessions: &[ClaudeSession]) -> HashMap<u32, Summary> {
@@ -49,71 +56,94 @@ pub fn load_summaries(sessions: &[ClaudeSession]) -> HashMap<u32, Summary> {
         };
 
         let truncated = truncate_display(&display, 80);
+        let is_clear = display == "/clear";
 
         let _ = by_session_id
             .entry(session_id)
             .and_modify(|s| {
                 s.last_display.clone_from(&truncated);
                 s.last_timestamp = ts;
+                if is_clear {
+                    s.session_changed = true;
+                }
             })
             .or_insert(SessionSummary {
                 last_display: truncated,
                 last_timestamp: ts,
                 first_timestamp: ts,
                 project,
+                session_changed: is_clear,
             });
     }
 
-    let claimed: std::collections::HashSet<&str> =
-        sessions.iter().map(|s| s.session_id.as_str()).collect();
+    let live_sids: std::collections::HashSet<String> =
+        sessions.iter().map(|s| s.session_id.clone()).collect();
 
-    for session in sessions {
-        let (mut best_ts, mut best_display) = by_session_id
-            .get(&session.session_id)
-            .map_or((0_u64, None), |summary| {
-                (summary.last_timestamp, Some(summary.last_display.clone()))
-            });
-
-        for (sid, summary) in &by_session_id {
-            if claimed.contains(sid.as_str()) {
-                continue;
-            }
-
-            if summary.project != session.cwd || summary.last_timestamp <= best_ts {
-                continue;
-            }
-
-            if summary.first_timestamp < session.started_at {
-                continue;
-            }
-
-            let range = (session.started_at + 1)..=summary.first_timestamp;
-            let dominated_by_other = sessions.iter().any(|other| {
-                other.pid != session.pid
-                    && other.cwd == session.cwd
-                    && range.contains(&other.started_at)
-            });
-
-            if dominated_by_other {
-                continue;
-            }
-
-            best_ts = summary.last_timestamp;
-            best_display = Some(summary.last_display.clone());
-        }
-
-        if let Some(display) = best_display {
-            let _ = result.insert(
-                session.pid,
-                Summary {
-                    display,
-                    timestamp: best_ts,
-                },
+    let mut candidates: Vec<(u32, ChainResult)> = sessions
+        .iter()
+        .filter_map(|session| {
+            let chain = follow_chain(
+                &session.session_id,
+                &session.cwd,
+                &by_session_id,
+                &live_sids,
             );
+            chain.map(|c| (session.pid, c))
+        })
+        .collect();
+
+    candidates.sort_by(|(_, a), (_, b)| b.depth.cmp(&a.depth));
+
+    let mut assigned_targets: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for (pid, chain) in candidates {
+        if assigned_targets.contains(&chain.target_sid) {
+            continue;
         }
+        let _ = assigned_targets.insert(chain.target_sid);
+        let _ = result.insert(pid, chain.summary);
     }
 
     result
+}
+
+fn follow_chain(
+    start_sid: &str,
+    cwd: &str,
+    map: &HashMap<String, SessionSummary>,
+    live_sids: &std::collections::HashSet<String>,
+) -> Option<ChainResult> {
+    let mut current_sid = start_sid;
+    for (depth, _) in (0..20).enumerate() {
+        let summary = map.get(current_sid)?;
+
+        if !summary.session_changed {
+            return Some(ChainResult {
+                summary: Summary {
+                    display: summary.last_display.clone(),
+                    timestamp: summary.last_timestamp,
+                },
+                depth,
+                target_sid: current_sid.to_owned(),
+            });
+        }
+
+        let after = summary.last_timestamp;
+        let next = map
+            .iter()
+            .filter(|(sid, s)| {
+                (sid.as_str() == start_sid || !live_sids.contains(sid.as_str()))
+                    && s.project == cwd
+                    && s.first_timestamp > after
+            })
+            .min_by_key(|(_, s)| s.first_timestamp);
+
+        let (next_sid, _) = next?;
+
+        current_sid = next_sid;
+    }
+
+    None
 }
 
 fn truncate_display(text: &str, max_chars: usize) -> String {
