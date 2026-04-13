@@ -133,9 +133,9 @@ fn sort_entries(entries: &mut [ListEntry], order: SortOrder) {
 }
 
 fn gather_list_entries(order: SortOrder) -> anyhow::Result<Vec<ListEntry>> {
-    let sessions = claude::discover_sessions();
-    let pane_map = tmux::list_pane_targets()?;
     let proc_tree = process::ProcessTree::build();
+    let sessions = claude::discover_sessions(&proc_tree);
+    let pane_map = tmux::list_pane_targets()?;
     let summaries = history::load_summaries(&sessions);
 
     let with_panes: Vec<_> = sessions
@@ -148,7 +148,7 @@ fn gather_list_entries(order: SortOrder) -> anyhow::Result<Vec<ListEntry>> {
     let mut entries: Vec<ListEntry> = with_panes
         .iter()
         .map(|(session, pane)| {
-            let info = claude::detect_info(session);
+            let info = claude::detect_info(session, &proc_tree);
             let state_str = match info.state {
                 claude::SessionState::Active => "active",
                 claude::SessionState::Idle => "idle",
@@ -219,9 +219,9 @@ pub fn run_list(sort: Option<&str>) -> anyhow::Result<()> {
 /// # Errors
 /// Returns an error if tmux is not running or session options cannot be set.
 pub fn run_update(filter: &str) -> anyhow::Result<()> {
-    let sessions = claude::discover_sessions();
-    let pane_map = tmux::list_pane_targets()?;
     let proc_tree = process::ProcessTree::build();
+    let sessions = claude::discover_sessions(&proc_tree);
+    let pane_map = tmux::list_pane_targets()?;
     let all_tmux_sessions = tmux::list_sessions()?;
     let custom_format = tmux::get_global_option("@clux-format")?;
     let format_str = custom_format.as_deref().unwrap_or(DEFAULT_FORMAT);
@@ -230,7 +230,7 @@ pub fn run_update(filter: &str) -> anyhow::Result<()> {
 
     for session in &sessions {
         if let Some(pane) = process::find_tmux_pane(session.pid, &pane_map, &proc_tree) {
-            let info = claude::detect_info(session);
+            let info = claude::detect_info(session, &proc_tree);
             let entry = counts
                 .entry(pane.session_name.clone())
                 .or_insert(SessionCounts { active: 0, idle: 0 });

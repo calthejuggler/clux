@@ -1,3 +1,4 @@
+use crate::process::ProcessTree;
 use serde::Deserialize;
 use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -30,15 +31,19 @@ pub struct SessionInfo {
     pub active_agents: u32,
 }
 
-pub fn discover_sessions() -> Vec<ClaudeSession> {
-    let sessions_dir = match home_dir().map(|h| h.join(".claude").join("sessions")) {
-        Some(d) if d.is_dir() => d,
+pub fn discover_sessions(tree: &ProcessTree) -> Vec<ClaudeSession> {
+    let sessions_dir = match home_dir().map(|home| home.join(".claude").join("sessions")) {
+        Some(dir) if dir.is_dir() => dir,
         _ => return Vec::new(),
     };
-    discover_sessions_in(&sessions_dir, true)
+    discover_sessions_in(&sessions_dir, true, tree)
 }
 
-pub fn discover_sessions_in(sessions_dir: &Path, check_alive: bool) -> Vec<ClaudeSession> {
+pub fn discover_sessions_in(
+    sessions_dir: &Path,
+    check_alive: bool,
+    tree: &ProcessTree,
+) -> Vec<ClaudeSession> {
     let mut sessions = Vec::new();
 
     let Ok(entries) = std::fs::read_dir(sessions_dir) else {
@@ -47,7 +52,7 @@ pub fn discover_sessions_in(sessions_dir: &Path, check_alive: bool) -> Vec<Claud
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
             continue;
         }
 
@@ -59,7 +64,7 @@ pub fn discover_sessions_in(sessions_dir: &Path, check_alive: bool) -> Vec<Claud
             continue;
         };
 
-        if check_alive && !is_pid_alive(session.pid) {
+        if check_alive && !tree.is_alive(session.pid) {
             continue;
         }
 
@@ -69,7 +74,7 @@ pub fn discover_sessions_in(sessions_dir: &Path, check_alive: bool) -> Vec<Claud
     sessions
 }
 
-pub fn detect_info(session: &ClaudeSession) -> SessionInfo {
+pub fn detect_info(session: &ClaudeSession, tree: &ProcessTree) -> SessionInfo {
     let Some(home) = home_dir() else {
         return SessionInfo {
             state: SessionState::Active,
@@ -78,10 +83,10 @@ pub fn detect_info(session: &ClaudeSession) -> SessionInfo {
             active_agents: 0,
         };
     };
-    detect_info_in(session, &home)
+    detect_info_in(session, &home, tree)
 }
 
-pub fn detect_info_in(session: &ClaudeSession, home: &Path) -> SessionInfo {
+pub fn detect_info_in(session: &ClaudeSession, home: &Path, tree: &ProcessTree) -> SessionInfo {
     let default = SessionInfo {
         state: SessionState::Active,
         mode: SessionMode::Default,
@@ -99,13 +104,13 @@ pub fn detect_info_in(session: &ClaudeSession, home: &Path) -> SessionInfo {
 
     let (state, mode) = parse_jsonl_tail(&tail);
 
-    let (tasks, agents) = count_active_background(session);
+    let (tasks, agents) = count_active_background(session, tree);
 
     let mut final_state = state;
 
     if matches!(final_state, SessionState::Idle)
         && is_jsonl_stale(session, &jsonl_path)
-        && has_child_processes(session.pid)
+        && tree.has_children(session.pid)
     {
         final_state = SessionState::Active;
     }
@@ -199,7 +204,7 @@ fn is_jsonl_stale(session: &ClaudeSession, jsonl_path: &Path) -> bool {
 
     entries.flatten().any(|entry| {
         let path = entry.path();
-        path.extension().and_then(|e| e.to_str()) == Some("jsonl")
+        path.extension().and_then(|ext| ext.to_str()) == Some("jsonl")
             && path != *jsonl_path
             && path
                 .metadata()
@@ -213,24 +218,7 @@ fn is_jsonl_stale(session: &ClaudeSession, jsonl_path: &Path) -> bool {
     })
 }
 
-#[cfg(target_os = "linux")]
-fn has_child_processes(pid: u32) -> bool {
-    let children_path = format!("/proc/{pid}/task/{pid}/children");
-    std::fs::read_to_string(&children_path)
-        .ok()
-        .is_some_and(|s| !s.trim().is_empty())
-}
-
-#[cfg(target_os = "macos")]
-fn has_child_processes(pid: u32) -> bool {
-    std::process::Command::new("pgrep")
-        .args(["-P", &pid.to_string()])
-        .output()
-        .ok()
-        .is_some_and(|o| !o.stdout.is_empty())
-}
-
-fn count_active_background(session: &ClaudeSession) -> (u32, u32) {
+fn count_active_background(session: &ClaudeSession, tree: &ProcessTree) -> (u32, u32) {
     let uid = current_uid();
     let encoded_cwd = encode_cwd(&session.cwd);
     let tasks_dir = PathBuf::from(format!(
@@ -242,13 +230,13 @@ fn count_active_background(session: &ClaudeSession) -> (u32, u32) {
         return (0, 0);
     };
 
-    let open_files = collect_open_files(session.pid);
+    let open_files = collect_open_files(session.pid, tree);
 
     let mut tasks = 0;
     let mut agents = 0;
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("output") {
+        if path.extension().and_then(|ext| ext.to_str()) != Some("output") {
             continue;
         }
         let is_active = path
@@ -268,9 +256,9 @@ fn count_active_background(session: &ClaudeSession) -> (u32, u32) {
 }
 
 #[cfg(target_os = "linux")]
-fn collect_open_files(parent_pid: u32) -> std::collections::HashSet<PathBuf> {
+fn collect_open_files(parent_pid: u32, tree: &ProcessTree) -> std::collections::HashSet<PathBuf> {
     let mut files = std::collections::HashSet::new();
-    let child_pids = child_pids_of(parent_pid);
+    let child_pids = tree.descendants_of(parent_pid);
     for pid in child_pids {
         let fd_dir = format!("/proc/{pid}/fd");
         if let Ok(fds) = std::fs::read_dir(&fd_dir) {
@@ -284,75 +272,25 @@ fn collect_open_files(parent_pid: u32) -> std::collections::HashSet<PathBuf> {
     files
 }
 
-#[cfg(target_os = "linux")]
-fn child_pids_of(parent: u32) -> Vec<u32> {
-    let task_dir = format!("/proc/{parent}/task");
-    let Ok(entries) = std::fs::read_dir(&task_dir) else {
-        return Vec::new();
-    };
-
-    let mut children = Vec::new();
-    for entry in entries.flatten() {
-        let children_path = entry.path().join("children");
-        if let Ok(content) = std::fs::read_to_string(&children_path) {
-            for pid_str in content.split_whitespace() {
-                if let Ok(pid) = pid_str.parse::<u32>() {
-                    children.push(pid);
-                    children.extend(descendant_pids(pid));
-                }
-            }
-        }
-    }
-    children
-}
-
-#[cfg(target_os = "linux")]
-fn descendant_pids(pid: u32) -> Vec<u32> {
-    let children_path = format!("/proc/{pid}/task/{pid}/children");
-    let Ok(content) = std::fs::read_to_string(&children_path) else {
-        return Vec::new();
-    };
-    let mut pids = Vec::new();
-    for pid_str in content.split_whitespace() {
-        if let Ok(child) = pid_str.parse::<u32>() {
-            pids.push(child);
-            pids.extend(descendant_pids(child));
-        }
-    }
-    pids
-}
-
 #[cfg(target_os = "macos")]
-fn descendant_pids(pid: u32) -> Vec<u32> {
-    let Ok(output) = std::process::Command::new("pgrep")
-        .args(["-P", &pid.to_string()])
-        .output()
-    else {
-        return Vec::new();
-    };
-    let mut pids = Vec::new();
-    for pid_str in String::from_utf8_lossy(&output.stdout).split_whitespace() {
-        if let Ok(child) = pid_str.parse::<u32>() {
-            pids.push(child);
-            pids.extend(descendant_pids(child));
-        }
-    }
-    pids
-}
-
-#[cfg(target_os = "macos")]
-fn collect_open_files(parent_pid: u32) -> std::collections::HashSet<PathBuf> {
-    let child_pids = descendant_pids(parent_pid);
+fn collect_open_files(parent_pid: u32, tree: &ProcessTree) -> std::collections::HashSet<PathBuf> {
+    let child_pids = tree.descendants_of(parent_pid);
     let mut files = std::collections::HashSet::new();
-    for pid in child_pids {
-        if let Ok(lsof) = std::process::Command::new("lsof")
-            .args(["-p", &pid.to_string(), "-Fn"])
-            .output()
-        {
-            for line in String::from_utf8_lossy(&lsof.stdout).lines() {
-                if let Some(path) = line.strip_prefix('n') {
-                    let _ = files.insert(PathBuf::from(path));
-                }
+    if child_pids.is_empty() {
+        return files;
+    }
+    let pid_arg: String = child_pids
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    if let Ok(lsof) = std::process::Command::new("lsof")
+        .args(["-p", &pid_arg, "-Fn"])
+        .output()
+    {
+        for line in String::from_utf8_lossy(&lsof.stdout).lines() {
+            if let Some(path) = line.strip_prefix('n') {
+                let _ = files.insert(PathBuf::from(path));
             }
         }
     }
@@ -393,45 +331,35 @@ pub fn read_tail_chunk(path: &Path) -> Option<String> {
 }
 
 #[cfg(target_os = "linux")]
-fn is_pid_alive(pid: u32) -> bool {
-    std::path::Path::new(&format!("/proc/{pid}")).exists()
-}
-
-#[cfg(target_os = "macos")]
-fn is_pid_alive(pid: u32) -> bool {
-    std::process::Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
-fn home_dir() -> Option<PathBuf> {
-    std::env::var("HOME").ok().map(PathBuf::from)
-}
-
-#[cfg(target_os = "linux")]
 fn current_uid() -> u32 {
     std::fs::read_to_string("/proc/self/status")
         .ok()
-        .and_then(|s| {
-            s.lines()
-                .find(|l| l.starts_with("Uid:"))
-                .and_then(|l| l.split_whitespace().nth(1))
-                .and_then(|u| u.parse().ok())
+        .and_then(|content| {
+            content
+                .lines()
+                .find(|line| line.starts_with("Uid:"))
+                .and_then(|line| line.split_whitespace().nth(1))
+                .and_then(|uid| uid.parse().ok())
         })
         .unwrap_or(1000)
 }
 
 #[cfg(target_os = "macos")]
 fn current_uid() -> u32 {
-    std::process::Command::new("id")
-        .arg("-u")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(501)
+    static UID: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *UID.get_or_init(|| {
+        std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .ok()
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .and_then(|text| text.trim().parse().ok())
+            .unwrap_or(501)
+    })
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var("HOME").ok().map(PathBuf::from)
 }
 
 #[cfg(test)]
@@ -456,7 +384,8 @@ mod tests {
     #[test]
     fn discover_sessions_empty_dir() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let sessions = discover_sessions_in(dir.path(), false);
+        let tree = ProcessTree::build();
+        let sessions = discover_sessions_in(dir.path(), false, &tree);
         assert!(sessions.is_empty());
     }
 
@@ -464,7 +393,8 @@ mod tests {
     fn discover_sessions_invalid_json() {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("bad.json"), "not json").expect("write");
-        let sessions = discover_sessions_in(dir.path(), false);
+        let tree = ProcessTree::build();
+        let sessions = discover_sessions_in(dir.path(), false, &tree);
         assert!(sessions.is_empty());
     }
 
@@ -473,7 +403,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("notes.txt"), "hello").expect("write");
         std::fs::write(dir.path().join("data.log"), "log line").expect("write");
-        let sessions = discover_sessions_in(dir.path(), false);
+        let tree = ProcessTree::build();
+        let sessions = discover_sessions_in(dir.path(), false, &tree);
         assert!(sessions.is_empty());
     }
 
@@ -487,7 +418,8 @@ mod tests {
             "startedAt": 1700000000_u64
         });
         std::fs::write(dir.path().join("sess.json"), json.to_string()).expect("write");
-        let sessions = discover_sessions_in(dir.path(), false);
+        let tree = ProcessTree::build();
+        let sessions = discover_sessions_in(dir.path(), false, &tree);
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions.first().expect("session").session_id, "abc-123");
         assert_eq!(sessions.first().expect("session").cwd, "/home/user/project");
@@ -503,7 +435,8 @@ mod tests {
             "startedAt": 1700000000_u64
         });
         std::fs::write(dir.path().join("dead.json"), json.to_string()).expect("write");
-        let sessions = discover_sessions_in(dir.path(), true);
+        let tree = ProcessTree::build();
+        let sessions = discover_sessions_in(dir.path(), true, &tree);
         assert!(sessions.is_empty());
     }
 
@@ -636,7 +569,8 @@ mod tests {
     fn detect_info_no_jsonl_returns_active() {
         let dir = tempfile::tempdir().expect("tempdir");
         let session = make_session("no-file", "/home/user");
-        let info = detect_info_in(&session, dir.path());
+        let tree = ProcessTree::build();
+        let info = detect_info_in(&session, dir.path(), &tree);
         assert!(matches!(info.state, SessionState::Active));
         assert!(matches!(info.mode, SessionMode::Default));
         assert_eq!(info.active_tasks, 0);
@@ -651,7 +585,8 @@ mod tests {
             r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn"}}"#;
         setup_jsonl(dir.path(), "/home/user", "sess-idle", content);
 
-        let info = detect_info_in(&session, dir.path());
+        let tree = ProcessTree::build();
+        let info = detect_info_in(&session, dir.path(), &tree);
         assert!(matches!(info.state, SessionState::Idle));
     }
 
@@ -662,7 +597,8 @@ mod tests {
         let content = r#"{"type":"user","message":{"role":"user"}}"#;
         setup_jsonl(dir.path(), "/home/user", "sess-active", content);
 
-        let info = detect_info_in(&session, dir.path());
+        let tree = ProcessTree::build();
+        let info = detect_info_in(&session, dir.path(), &tree);
         assert!(matches!(info.state, SessionState::Active));
     }
 
@@ -673,7 +609,8 @@ mod tests {
         let content = r#"{"type":"assistant","message":{"role":"assistant"}}"#;
         setup_jsonl(dir.path(), "/home/user", "sess-nostop", content);
 
-        let info = detect_info_in(&session, dir.path());
+        let tree = ProcessTree::build();
+        let info = detect_info_in(&session, dir.path(), &tree);
         assert!(matches!(info.state, SessionState::Active));
     }
 
@@ -685,7 +622,8 @@ mod tests {
             "{\"permissionMode\":\"plan\"}\n{\"type\":\"user\",\"message\":{\"role\":\"user\"}}";
         setup_jsonl(dir.path(), "/home/user", "sess-plan", content);
 
-        let info = detect_info_in(&session, dir.path());
+        let tree = ProcessTree::build();
+        let info = detect_info_in(&session, dir.path(), &tree);
         assert!(matches!(info.mode, SessionMode::Plan));
     }
 
@@ -696,7 +634,8 @@ mod tests {
         let content = "{\"permissionMode\":\"bypassPermissions\"}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"stop_reason\":\"end_turn\"}}";
         setup_jsonl(dir.path(), "/home/user", "sess-yolo", content);
 
-        let info = detect_info_in(&session, dir.path());
+        let tree = ProcessTree::build();
+        let info = detect_info_in(&session, dir.path(), &tree);
         assert!(matches!(info.mode, SessionMode::BypassPermissions));
         assert!(matches!(info.state, SessionState::Idle));
     }
@@ -708,7 +647,8 @@ mod tests {
         let content = "{\"permissionMode\":\"acceptEdits\"}\n{\"type\":\"user\",\"message\":{\"role\":\"user\"}}";
         setup_jsonl(dir.path(), "/home/user", "sess-edits", content);
 
-        let info = detect_info_in(&session, dir.path());
+        let tree = ProcessTree::build();
+        let info = detect_info_in(&session, dir.path(), &tree);
         assert!(matches!(info.mode, SessionMode::AcceptEdits));
     }
 
@@ -756,7 +696,8 @@ mod tests {
             std::fs::write(dir.path().join(format!("sess-{i}.json")), json.to_string())
                 .expect("write");
         }
-        let sessions = discover_sessions_in(dir.path(), false);
+        let tree = ProcessTree::build();
+        let sessions = discover_sessions_in(dir.path(), false, &tree);
         assert_eq!(sessions.len(), 3);
     }
 
@@ -766,7 +707,8 @@ mod tests {
         let session = make_session("sess-empty", "/home/user");
         setup_jsonl(dir.path(), "/home/user", "sess-empty", "");
 
-        let info = detect_info_in(&session, dir.path());
+        let tree = ProcessTree::build();
+        let info = detect_info_in(&session, dir.path(), &tree);
         assert!(matches!(info.state, SessionState::Active));
     }
 
