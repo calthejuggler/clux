@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/calthejuggler/clux/compare/v0.2.0...v0.2.1) - 2026-04-13
+
+### Other
+
+- eliminate macOS subprocess spawns by reusing ProcessTree cache
+
 ## [0.2.0](https://github.com/calthejuggler/clux/compare/v0.1.7...v0.2.0) - 2026-04-12
 
 ### Added
