@@ -105,6 +105,22 @@ pub fn choose_tree(filter: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn current_pane_target() -> anyhow::Result<Option<String>> {
+    let output = Command::new("tmux")
+        .args([
+            "display-message",
+            "-p",
+            "#{session_name}:#{window_index}.#{pane_index}",
+        ])
+        .output()?;
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(value))
+    }
+}
+
 pub fn switch_client(target: &str) -> anyhow::Result<()> {
     let _ = Command::new("tmux")
         .args(["switch-client", "-t", target])

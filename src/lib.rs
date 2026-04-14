@@ -1,6 +1,7 @@
 pub(crate) mod claude;
 pub(crate) mod history;
 pub(crate) mod process;
+pub(crate) mod recent;
 pub(crate) mod tmux;
 
 use std::cmp::Ordering;
@@ -13,6 +14,7 @@ struct SessionCounts {
 
 struct ListEntry {
     target: String,
+    session_id: String,
     state: &'static str,
     mode: &'static str,
     active_tasks: u32,
@@ -26,6 +28,7 @@ struct ListEntry {
 #[derive(Clone, Copy, Default)]
 pub enum SortOrder {
     #[default]
+    Recent,
     TimestampDesc,
     TimestampAsc,
     Status,
@@ -38,19 +41,20 @@ impl SortOrder {
     #[must_use]
     pub fn parse(s: &str) -> Self {
         match s {
+            "timestamp-desc" => Self::TimestampDesc,
             "timestamp-asc" => Self::TimestampAsc,
             "status" => Self::Status,
             "status-rev" => Self::StatusRev,
             "mode" => Self::Mode,
             "mode-rev" => Self::ModeRev,
-            _ => Self::TimestampDesc,
+            _ => Self::Recent,
         }
     }
 
     const fn tiebreak_timestamp(self) -> Ordering {
         match self {
             Self::StatusRev | Self::ModeRev => Ordering::Less,
-            Self::TimestampDesc | Self::TimestampAsc | Self::Status | Self::Mode => {
+            Self::Recent | Self::TimestampDesc | Self::TimestampAsc | Self::Status | Self::Mode => {
                 Ordering::Greater
             }
         }
@@ -115,7 +119,7 @@ fn command_exists(name: &str) -> bool {
 fn sort_entries(entries: &mut [ListEntry], order: SortOrder) {
     entries.sort_by(|a, b| {
         let primary = match order {
-            SortOrder::TimestampDesc => b.timestamp.cmp(&a.timestamp),
+            SortOrder::Recent | SortOrder::TimestampDesc => b.timestamp.cmp(&a.timestamp),
             SortOrder::TimestampAsc => a.timestamp.cmp(&b.timestamp),
             SortOrder::Status => b.state.cmp(a.state),
             SortOrder::StatusRev => a.state.cmp(b.state),
@@ -128,6 +132,36 @@ fn sort_entries(entries: &mut [ListEntry], order: SortOrder) {
         match order.tiebreak_timestamp() {
             Ordering::Less => a.timestamp.cmp(&b.timestamp),
             Ordering::Equal | Ordering::Greater => b.timestamp.cmp(&a.timestamp),
+        }
+    });
+}
+
+fn sort_entries_recent(
+    entries: &mut [ListEntry],
+    recent_entries: &[recent::RecentEntry],
+    current_target: Option<&str>,
+) {
+    let recent_map: HashMap<&str, u64> = recent_entries
+        .iter()
+        .map(|re| (re.session_id.as_str(), re.switched_at))
+        .collect();
+
+    entries.sort_by(|a, b| {
+        let a_current = current_target.is_some_and(|ct| ct == a.target);
+        let b_current = current_target.is_some_and(|ct| ct == b.target);
+
+        if a_current != b_current {
+            return a_current.cmp(&b_current);
+        }
+
+        let a_recent = recent_map.get(a.session_id.as_str());
+        let b_recent = recent_map.get(b.session_id.as_str());
+
+        match (a_recent, b_recent) {
+            (Some(a_ts), Some(b_ts)) => b_ts.cmp(a_ts),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => b.timestamp.cmp(&a.timestamp),
         }
     });
 }
@@ -168,6 +202,7 @@ fn gather_list_entries(order: SortOrder) -> anyhow::Result<Vec<ListEntry>> {
 
             ListEntry {
                 target: pane.target.clone(),
+                session_id: session.session_id.clone(),
                 state: state_str,
                 mode: mode_str,
                 active_tasks: info.active_tasks,
@@ -180,7 +215,13 @@ fn gather_list_entries(order: SortOrder) -> anyhow::Result<Vec<ListEntry>> {
         })
         .collect();
 
-    sort_entries(&mut entries, order);
+    if matches!(order, SortOrder::Recent) {
+        let recent_data = recent::load();
+        let current = tmux::current_pane_target()?;
+        sort_entries_recent(&mut entries, &recent_data, current.as_deref());
+    } else {
+        sort_entries(&mut entries, order);
+    }
 
     Ok(entries)
 }
@@ -354,6 +395,9 @@ fn pick_with_fzf(entries: &[ListEntry]) -> anyhow::Result<()> {
     if let Some(chosen_target) = trimmed.split('\t').next()
         && !chosen_target.is_empty()
     {
+        if let Some(entry) = entries.iter().find(|en| en.target == chosen_target) {
+            drop(recent::record_switch(&entry.session_id));
+        }
         tmux::switch_client(chosen_target)?;
     }
 
@@ -534,6 +578,7 @@ mod tests {
     fn make_entry(state: &'static str, mode: &'static str, timestamp: u64) -> ListEntry {
         ListEntry {
             target: String::new(),
+            session_id: String::new(),
             state,
             mode,
             active_tasks: 0,
@@ -547,6 +592,7 @@ mod tests {
 
     #[test]
     fn sort_order_parse_all_variants() {
+        assert!(matches!(SortOrder::parse("recent"), SortOrder::Recent));
         assert!(matches!(
             SortOrder::parse("timestamp-desc"),
             SortOrder::TimestampDesc
@@ -565,12 +611,9 @@ mod tests {
     }
 
     #[test]
-    fn sort_order_parse_unknown_defaults_to_timestamp_desc() {
-        assert!(matches!(
-            SortOrder::parse("unknown"),
-            SortOrder::TimestampDesc
-        ));
-        assert!(matches!(SortOrder::parse(""), SortOrder::TimestampDesc));
+    fn sort_order_parse_unknown_defaults_to_recent() {
+        assert!(matches!(SortOrder::parse("unknown"), SortOrder::Recent));
+        assert!(matches!(SortOrder::parse(""), SortOrder::Recent));
     }
 
     #[test]
@@ -728,5 +771,142 @@ mod tests {
         let mut entries = vec![make_entry("active", "default", 100)];
         sort_entries(&mut entries, SortOrder::Mode);
         assert_eq!(entries[0].timestamp, 100);
+    }
+
+    fn make_recent_entry(target: &str, session_id: &str, timestamp: u64) -> ListEntry {
+        ListEntry {
+            target: target.to_owned(),
+            session_id: session_id.to_owned(),
+            state: "active",
+            mode: "default",
+            active_tasks: 0,
+            active_agents: 0,
+            summary: String::new(),
+            cwd: String::new(),
+            session_name: String::new(),
+            timestamp,
+        }
+    }
+
+    #[test]
+    fn sort_recent_current_session_last() {
+        let mut entries = vec![
+            make_recent_entry("0:1.1", "sess-a", 100),
+            make_recent_entry("0:1.2", "sess-b", 200),
+            make_recent_entry("0:1.3", "sess-c", 300),
+        ];
+        let recent_data = vec![
+            recent::RecentEntry {
+                session_id: "sess-c".to_owned(),
+                switched_at: 1000,
+            },
+            recent::RecentEntry {
+                session_id: "sess-a".to_owned(),
+                switched_at: 900,
+            },
+            recent::RecentEntry {
+                session_id: "sess-b".to_owned(),
+                switched_at: 800,
+            },
+        ];
+        sort_entries_recent(&mut entries, &recent_data, Some("0:1.3"));
+        assert_eq!(entries.first().expect("entry").session_id, "sess-a");
+        assert_eq!(entries.get(1).expect("entry").session_id, "sess-b");
+        assert_eq!(entries.get(2).expect("entry").session_id, "sess-c");
+    }
+
+    #[test]
+    fn sort_recent_tracked_by_switched_at_desc() {
+        let mut entries = vec![
+            make_recent_entry("0:1.1", "sess-a", 100),
+            make_recent_entry("0:1.2", "sess-b", 200),
+            make_recent_entry("0:1.3", "sess-c", 300),
+        ];
+        let recent_data = vec![
+            recent::RecentEntry {
+                session_id: "sess-b".to_owned(),
+                switched_at: 1000,
+            },
+            recent::RecentEntry {
+                session_id: "sess-c".to_owned(),
+                switched_at: 900,
+            },
+            recent::RecentEntry {
+                session_id: "sess-a".to_owned(),
+                switched_at: 800,
+            },
+        ];
+        sort_entries_recent(&mut entries, &recent_data, None);
+        assert_eq!(entries.first().expect("entry").session_id, "sess-b");
+        assert_eq!(entries.get(1).expect("entry").session_id, "sess-c");
+        assert_eq!(entries.get(2).expect("entry").session_id, "sess-a");
+    }
+
+    #[test]
+    fn sort_recent_untracked_after_tracked() {
+        let mut entries = vec![
+            make_recent_entry("0:1.1", "sess-a", 300),
+            make_recent_entry("0:1.2", "sess-b", 100),
+            make_recent_entry("0:1.3", "sess-c", 200),
+        ];
+        let recent_data = vec![recent::RecentEntry {
+            session_id: "sess-b".to_owned(),
+            switched_at: 1000,
+        }];
+        sort_entries_recent(&mut entries, &recent_data, None);
+        assert_eq!(entries.first().expect("entry").session_id, "sess-b");
+        assert_eq!(entries.get(1).expect("entry").session_id, "sess-a");
+        assert_eq!(entries.get(2).expect("entry").session_id, "sess-c");
+    }
+
+    #[test]
+    fn sort_recent_untracked_sorted_by_timestamp_desc() {
+        let mut entries = vec![
+            make_recent_entry("0:1.1", "sess-a", 100),
+            make_recent_entry("0:1.2", "sess-b", 300),
+            make_recent_entry("0:1.3", "sess-c", 200),
+        ];
+        let recent_data: Vec<recent::RecentEntry> = vec![];
+        sort_entries_recent(&mut entries, &recent_data, None);
+        assert_eq!(entries.first().expect("entry").session_id, "sess-b");
+        assert_eq!(entries.get(1).expect("entry").session_id, "sess-c");
+        assert_eq!(entries.get(2).expect("entry").session_id, "sess-a");
+    }
+
+    #[test]
+    fn sort_recent_full_harpoon_order() {
+        let mut entries = vec![
+            make_recent_entry("0:1.1", "sess-current", 100),
+            make_recent_entry("0:1.2", "sess-prev", 200),
+            make_recent_entry("0:1.3", "sess-old", 300),
+            make_recent_entry("0:1.4", "sess-untracked", 400),
+        ];
+        let recent_data = vec![
+            recent::RecentEntry {
+                session_id: "sess-current".to_owned(),
+                switched_at: 1000,
+            },
+            recent::RecentEntry {
+                session_id: "sess-prev".to_owned(),
+                switched_at: 900,
+            },
+            recent::RecentEntry {
+                session_id: "sess-old".to_owned(),
+                switched_at: 800,
+            },
+        ];
+        sort_entries_recent(&mut entries, &recent_data, Some("0:1.1"));
+        assert_eq!(entries.first().expect("entry").session_id, "sess-prev");
+        assert_eq!(entries.get(1).expect("entry").session_id, "sess-old");
+        assert_eq!(entries.get(2).expect("entry").session_id, "sess-untracked");
+        assert_eq!(entries.get(3).expect("entry").session_id, "sess-current");
+    }
+
+    #[test]
+    fn sort_recent_empty() {
+        let mut entries: Vec<ListEntry> = vec![];
+        let recent_data: Vec<recent::RecentEntry> = vec![];
+        sort_entries_recent(&mut entries, &recent_data, None);
+        assert!(entries.is_empty());
     }
 }

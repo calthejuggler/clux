@@ -17,7 +17,7 @@ enum Command {
     },
     /// List Claude Code sessions (tab-separated)
     List {
-        /// Sort order: timestamp-desc, timestamp-asc, status, status-rev, mode, mode-rev
+        /// Sort order: recent, timestamp-desc, timestamp-asc, status, status-rev, mode, mode-rev
         #[arg(long)]
         sort: Option<String>,
     },
@@ -29,7 +29,7 @@ enum Command {
     },
     /// Open a Claude-only session picker (fzf or tmux menu)
     Pick {
-        /// Sort order: timestamp-desc, timestamp-asc, status, status-rev, mode, mode-rev
+        /// Sort order: recent, timestamp-desc, timestamp-asc, status, status-rev, mode, mode-rev
         #[arg(long)]
         sort: Option<String>,
     },

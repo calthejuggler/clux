@@ -108,11 +108,11 @@ These options are set in your `.tmux.conf` and only apply when using clux as a t
 | `@clux-format` | ` \| {total} ({detail})` | Format string for session status |
 | `@clux-filter-binds` | _(none)_ | Comma-separated `key:filter` pairs for filtered pickers |
 | `@clux-fzf` | _(on)_ | Set to `off` to use tmux menus instead of fzf in the Claude picker |
-| `@clux-sort` | `timestamp-desc` | Sort order for `list` and `pick` commands |
+| `@clux-sort` | `recent` | Sort order for `list` and `pick` commands |
 
 ### The Claude picker
 
-The Claude picker (`prefix + a`) gives you a focused view of just your Claude sessions. It shows state, mode, task count, sub-agent count, a summary of what Claude is doing, and the working directory. Sessions are sorted by most recent activity by default.
+The Claude picker (`prefix + a`) gives you a focused view of just your Claude sessions. It shows state, mode, task count, sub-agent count, a summary of what Claude is doing, and the working directory. Sessions are sorted by most recently switched-to by default, with the current session pinned to the bottom (like harpoon).
 
 If you have `fzf-tmux` installed, it uses that for fuzzy finding. Otherwise it falls back to a tmux display-menu. You can force the menu with `set -g @clux-fzf 'off'`.
 
@@ -122,7 +122,8 @@ Both the Claude picker and `clux list` support configurable sort order. Set `@cl
 
 | Value | Description |
 |-------|-------------|
-| `timestamp-desc` | Most recent activity first (default) |
+| `recent` | Most recently switched-to first, current session last (default) |
+| `timestamp-desc` | Most recent activity first |
 | `timestamp-asc` | Oldest activity first |
 | `status` | Idle first, then active |
 | `status-rev` | Active first, then idle |
