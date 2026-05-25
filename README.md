@@ -72,6 +72,31 @@ Pre-built binaries are available for Linux and macOS (both x86_64 and aarch64).
 cargo install --git https://github.com/calthejuggler/clux
 ```
 
+### NixOS / Home Manager
+
+The plugin normally downloads its binary at startup, which fails in the nix store since it's read-only. The easiest fix is to use the flake.
+
+Add clux to your flake inputs:
+
+```nix
+inputs.clux.url = "github:calthejuggler/clux";
+```
+
+Then in your home config:
+
+```nix
+{ inputs, pkgs, ... }: {
+  # gives you `clux` on your PATH outside of tmux too
+  home.packages = [ inputs.clux.packages.${pkgs.system}.default ];
+
+  programs.tmux.plugins = [
+    inputs.clux.packages.${pkgs.system}.tmuxPlugin
+  ];
+}
+```
+
+`tmuxPlugin` has the binary bundled in the store, so there's no download at startup.
+
 ## CLI usage
 
 ```
