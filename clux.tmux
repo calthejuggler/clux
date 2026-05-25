@@ -10,7 +10,7 @@ CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KEY=$(tmux show-option -gqv @clux-key)
 KEY="${KEY:-s}"
 
-BINARY="${CURRENT_DIR}/bin/clux"
+BINARY=$(command -v clux 2>/dev/null || echo "${CURRENT_DIR}/bin/clux")
 
 tmux bind-key "${KEY}" run-shell "${BINARY} select"
 
