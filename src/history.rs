@@ -95,7 +95,7 @@ pub fn load_summaries_from(sessions: &[ClaudeSession], contents: &str) -> HashMa
         })
         .collect();
 
-    candidates.sort_by(|(_, a), (_, b)| b.depth.cmp(&a.depth));
+    candidates.sort_by_key(|(_, c)| std::cmp::Reverse(c.depth));
 
     let mut assigned_targets: std::collections::HashSet<String> = std::collections::HashSet::new();
 
