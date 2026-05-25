@@ -1,29 +1,31 @@
 use std::collections::HashMap;
-use std::process::Command;
+use std::process::{Command, Output};
 
 pub struct PaneInfo {
     pub session_name: String,
     pub target: String,
 }
 
-pub fn list_pane_targets() -> anyhow::Result<HashMap<u32, PaneInfo>> {
-    let output = Command::new("tmux")
-        .args([
-            "list-panes",
-            "-a",
-            "-F",
-            "#{pane_pid}\t#{session_name}:#{window_index}.#{pane_index}\t#{session_name}",
-        ])
-        .output();
-
-    match output {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+fn run_tmux(args: &[&str]) -> anyhow::Result<Option<Output>> {
+    match Command::new("tmux").args(args).output() {
+        Ok(output) => Ok(Some(output)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e.into()),
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            Ok(parse_pane_targets(&stdout))
-        }
     }
+}
+
+pub fn list_pane_targets() -> anyhow::Result<HashMap<u32, PaneInfo>> {
+    let Some(out) = run_tmux(&[
+        "list-panes",
+        "-a",
+        "-F",
+        "#{pane_pid}\t#{session_name}:#{window_index}.#{pane_index}\t#{session_name}",
+    ])?
+    else {
+        return Ok(HashMap::new());
+    };
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    Ok(parse_pane_targets(&stdout))
 }
 
 pub fn parse_pane_targets(stdout: &str) -> HashMap<u32, PaneInfo> {
@@ -76,9 +78,9 @@ pub fn unset_session_option(session: &str, key: &str) -> anyhow::Result<()> {
 }
 
 pub fn get_global_option(key: &str) -> anyhow::Result<Option<String>> {
-    let output = Command::new("tmux")
-        .args(["show-option", "-gqv", key])
-        .output()?;
+    let Some(output) = run_tmux(&["show-option", "-gqv", key])? else {
+        return Ok(None);
+    };
     let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     if value.is_empty() {
         Ok(None)
@@ -112,14 +114,15 @@ pub fn choose_tree(filter: &str) -> anyhow::Result<()> {
 }
 
 pub fn current_pane_target() -> anyhow::Result<Option<String>> {
-    let output = Command::new("tmux")
-        .args([
-            "display-message",
-            "-p",
-            "#{session_name}:#{window_index}.#{pane_index}",
-        ])
-        .output()?;
-    let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let Some(out) = run_tmux(&[
+        "display-message",
+        "-p",
+        "#{session_name}:#{window_index}.#{pane_index}",
+    ])?
+    else {
+        return Ok(None);
+    };
+    let value = String::from_utf8_lossy(&out.stdout).trim().to_owned();
     if value.is_empty() {
         Ok(None)
     } else {
