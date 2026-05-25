@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1](https://github.com/calthejuggler/clux/compare/v0.3.0...v0.3.1) - 2026-05-25
+
+### Fixed
+
+- prefer PATH binary over local bin/clux ([#12](https://github.com/calthejuggler/clux/pull/12))
+
 ## [0.3.0](https://github.com/calthejuggler/clux/compare/v0.2.1...v0.3.0) - 2026-04-14
 
 ### Added
