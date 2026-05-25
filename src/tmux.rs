@@ -78,9 +78,9 @@ pub fn unset_session_option(session: &str, key: &str) -> anyhow::Result<()> {
 }
 
 pub fn get_global_option(key: &str) -> anyhow::Result<Option<String>> {
-    let output = Command::new("tmux")
-        .args(["show-option", "-gqv", key])
-        .output()?;
+    let Some(output) = run_tmux(&["show-option", "-gqv", key])? else {
+        return Ok(None);
+    };
     let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     if value.is_empty() {
         Ok(None)
