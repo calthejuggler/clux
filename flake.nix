@@ -18,6 +18,14 @@
             inherit version;
             src = self;
             cargoLock.lockFile = ./Cargo.lock;
+            meta = with pkgs.lib; {
+              description = "tmux plugin that shows Claude Code session status";
+              homepage = "https://github.com/calthejuggler/clux";
+              license = licenses.mit;
+              maintainers = [ ];
+              mainProgram = "clux";
+              platforms = platforms.unix;
+            };
           };
 
           tmuxPlugin = pkgs.tmuxPlugins.mkTmuxPlugin {
@@ -35,7 +43,14 @@
         };
 
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [ cargo rustc clippy rustfmt ];
+          buildInputs = with pkgs; [
+            cargo
+            rustc
+            clippy
+            rustfmt
+            rust-analyzer
+          ];
+          RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
         };
       });
 }
