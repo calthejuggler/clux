@@ -108,12 +108,12 @@ fn truncate_at(text: &str, max_chars: usize) -> String {
 }
 
 fn command_exists(name: &str) -> bool {
-    std::process::Command::new("which")
-        .arg(name)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|exit_status| exit_status.success())
+    std::env::var_os("PATH")
+        .map(|paths| {
+            std::env::split_paths(&paths)
+                .any(|dir| dir.join(name).is_file())
+        })
+        .unwrap_or(false)
 }
 
 fn sort_entries(entries: &mut [ListEntry], order: SortOrder) {
@@ -542,7 +542,7 @@ mod tests {
 
     #[test]
     fn command_exists_known_good() {
-        assert!(command_exists("sh"));
+        assert!(command_exists("env"));
     }
 
     #[test]
