@@ -17,8 +17,8 @@ pub fn list_pane_targets() -> anyhow::Result<HashMap<u32, PaneInfo>> {
         .output();
 
     match output {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
-        Err(e) => return Err(e.into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+        Err(e) => Err(e.into()),
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
             Ok(parse_pane_targets(&stdout))
