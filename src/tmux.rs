@@ -14,10 +14,16 @@ pub fn list_pane_targets() -> anyhow::Result<HashMap<u32, PaneInfo>> {
             "-F",
             "#{pane_pid}\t#{session_name}:#{window_index}.#{pane_index}\t#{session_name}",
         ])
-        .output()?;
+        .output();
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(parse_pane_targets(&stdout))
+    match output {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+        Err(e) => return Err(e.into()),
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            Ok(parse_pane_targets(&stdout))
+        }
+    }
 }
 
 pub fn parse_pane_targets(stdout: &str) -> HashMap<u32, PaneInfo> {
