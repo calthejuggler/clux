@@ -109,11 +109,7 @@ fn truncate_at(text: &str, max_chars: usize) -> String {
 
 fn command_exists(name: &str) -> bool {
     std::env::var_os("PATH")
-        .map(|paths| {
-            std::env::split_paths(&paths)
-                .any(|dir| dir.join(name).is_file())
-        })
-        .unwrap_or(false)
+        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(name).is_file()))
 }
 
 fn sort_entries(entries: &mut [ListEntry], order: SortOrder) {
