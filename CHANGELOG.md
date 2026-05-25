@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4](https://github.com/calthejuggler/clux/compare/v0.3.3...v0.3.4) - 2026-05-25
+
+### Fixed
+
+- handle tmux not installed in list-path functions ([#18](https://github.com/calthejuggler/clux/pull/18))
+
 ## [0.3.3](https://github.com/calthejuggler/clux/compare/v0.3.2...v0.3.3) - 2026-05-25
 
 ### Fixed
