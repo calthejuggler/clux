@@ -167,6 +167,7 @@ fn gather_list_entries(order: SortOrder) -> anyhow::Result<Vec<ListEntry>> {
     let sessions = claude::discover_sessions(&proc_tree);
     let pane_map = tmux::list_pane_targets()?;
     let summaries = history::load_summaries(&sessions);
+    let recaps_enabled = tmux::get_global_option("@clux-recaps")?.as_deref() != Some("off");
 
     let with_panes: Vec<_> = sessions
         .iter()
@@ -196,6 +197,12 @@ fn gather_list_entries(order: SortOrder) -> anyhow::Result<Vec<ListEntry>> {
                 .get(&session.pid)
                 .map_or(session.started_at, |smry| smry.timestamp);
 
+            let display_summary = info
+                .recap
+                .as_deref()
+                .filter(|_| recaps_enabled)
+                .unwrap_or(summary_text);
+
             ListEntry {
                 target: pane.target.clone(),
                 session_id: session.session_id.clone(),
@@ -203,7 +210,7 @@ fn gather_list_entries(order: SortOrder) -> anyhow::Result<Vec<ListEntry>> {
                 mode: mode_str,
                 active_tasks: info.active_tasks,
                 active_agents: info.active_agents,
-                summary: summary_text.to_owned(),
+                summary: display_summary.to_owned(),
                 cwd: shorten_cwd(&session.cwd),
                 session_name: pane.session_name.clone(),
                 timestamp,

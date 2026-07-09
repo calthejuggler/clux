@@ -133,11 +133,14 @@ These options are set in your `.tmux.conf` and only apply when using clux as a t
 | `@clux-format` | ` \| {total} ({detail})` | Format string for session status |
 | `@clux-filter-binds` | _(none)_ | Comma-separated `key:filter` pairs for filtered pickers |
 | `@clux-fzf` | _(on)_ | Set to `off` to use tmux menus instead of fzf in the Claude picker |
+| `@clux-recaps` | _(on)_ | Set to `off` to use history summaries instead of Claude Code recaps |
 | `@clux-sort` | `recent` | Sort order for `list` and `pick` commands |
 
 ### The Claude picker
 
 The Claude picker (`prefix + a`) gives you a focused view of just your Claude sessions. It shows state, mode, task count, sub-agent count, a summary of what Claude is doing, and the working directory. Sessions are sorted by most recently switched-to by default, with the current session pinned to the bottom (like harpoon).
+
+If Claude Code has produced a recap and no conversation message has been written after it, clux uses that recap as the summary. Set `@clux-recaps` to `off` to always use the older history-based summary.
 
 If you have `fzf-tmux` installed, it uses that for fuzzy finding. Otherwise it falls back to a tmux display-menu. You can force the menu with `set -g @clux-fzf 'off'`.
 

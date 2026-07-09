@@ -29,6 +29,7 @@ pub struct SessionInfo {
     pub mode: SessionMode,
     pub active_tasks: u32,
     pub active_agents: u32,
+    pub recap: Option<String>,
 }
 
 pub fn discover_sessions(tree: &ProcessTree) -> Vec<ClaudeSession> {
@@ -81,6 +82,7 @@ pub fn detect_info(session: &ClaudeSession, tree: &ProcessTree) -> SessionInfo {
             mode: SessionMode::Default,
             active_tasks: 0,
             active_agents: 0,
+            recap: None,
         };
     };
     detect_info_in(session, &home, tree)
@@ -92,6 +94,7 @@ pub fn detect_info_in(session: &ClaudeSession, home: &Path, tree: &ProcessTree) 
         mode: SessionMode::Default,
         active_tasks: 0,
         active_agents: 0,
+        recap: None,
     };
 
     let Some(jsonl_path) = find_jsonl_path_in(session, home) else {
@@ -103,6 +106,8 @@ pub fn detect_info_in(session: &ClaudeSession, home: &Path, tree: &ProcessTree) 
     };
 
     let (state, mode) = parse_jsonl_tail(&tail);
+
+    let recap = parse_recap(&tail);
 
     let (tasks, agents) = count_active_background(session, tree);
 
@@ -120,7 +125,40 @@ pub fn detect_info_in(session: &ClaudeSession, home: &Path, tree: &ProcessTree) 
         mode,
         active_tasks: tasks,
         active_agents: agents,
+        recap,
     }
+}
+
+pub fn parse_recap(tail: &str) -> Option<String> {
+    for line in tail.lines().rev() {
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+
+        let entry_type = entry.get("type").and_then(|t| t.as_str());
+
+        if entry_type == Some("user") || entry_type == Some("assistant") {
+            return None;
+        }
+
+        if entry_type == Some("system")
+            && entry.get("subtype").and_then(|s| s.as_str()) == Some("away_summary")
+        {
+            let content = entry.get("content").and_then(|c| c.as_str())?;
+            return Some(strip_recap_hint(content));
+        }
+    }
+
+    None
+}
+
+fn strip_recap_hint(content: &str) -> String {
+    content
+        .trim()
+        .strip_suffix("(disable recaps in /config)")
+        .unwrap_or(content)
+        .trim()
+        .to_owned()
 }
 
 pub fn parse_jsonl_tail(tail: &str) -> (SessionState, SessionMode) {
@@ -739,11 +777,52 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let session = ClaudeSession {
             pid: 1,
-            session_id: "nonexistent".to_owned(),
+            session_id: "nonaction".to_owned(),
             cwd: "/home/user".to_owned(),
             started_at: 0,
         };
         let result = find_jsonl_path_in(&session, dir.path());
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_recap_picks_last_away_summary() {
+        let tail = r#"{"type":"system","subtype":"away_summary","content":"Old recap (disable recaps in /config)"}
+{"type":"system","subtype":"away_summary","content":"Latest recap here (disable recaps in /config)"}"#;
+        assert_eq!(parse_recap(tail), Some("Latest recap here".to_owned()));
+    }
+
+    #[test]
+    fn parse_recap_skipped_when_conversation_continued() {
+        let tail = r#"{"type":"system","subtype":"away_summary","content":"Stale recap (disable recaps in /config)"}
+{"type":"user","message":{"role":"user"}}"#;
+        assert_eq!(parse_recap(tail), None);
+    }
+
+    #[test]
+    fn parse_recap_strips_disable_hint() {
+        let content = "Did stuff. Next: things. (disable recaps in /config)";
+        let json = serde_json::json!({
+            "type": "system",
+            "subtype": "away_summary",
+            "content": content
+        })
+        .to_string();
+        assert_eq!(
+            parse_recap(&json),
+            Some("Did stuff. Next: things.".to_owned())
+        );
+    }
+
+    #[test]
+    fn parse_recap_none_without_away_summary() {
+        let tail = r#"{"type":"system","subtype":"turn_duration"}
+{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn"}}"#;
+        assert_eq!(parse_recap(tail), None);
+    }
+
+    #[test]
+    fn parse_recap_none_on_empty() {
+        assert_eq!(parse_recap(""), None);
     }
 }
