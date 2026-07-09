@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5](https://github.com/calthejuggler/clux/compare/v0.3.4...v0.3.5) - 2026-07-09
+
+### Added
+
+- surface Claude Code recaps as session summaries
+- add envrc for nix direnv
+
+### Other
+
+- ignore .DS_STORE
+
 ## [0.3.4](https://github.com/calthejuggler/clux/compare/v0.3.3...v0.3.4) - 2026-05-25
 
 ### Fixed
