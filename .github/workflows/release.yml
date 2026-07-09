@@ -21,10 +21,10 @@ jobs:
             os: ubuntu-latest
             asset: clux-linux-aarch64
           - target: x86_64-apple-darwin
-            os: macos-latest
+            os: macos-26
             asset: clux-darwin-x86_64
           - target: aarch64-apple-darwin
-            os: macos-latest
+            os: macos-26
             asset: clux-darwin-aarch64
 
     runs-on: ${{ matrix.os }}
