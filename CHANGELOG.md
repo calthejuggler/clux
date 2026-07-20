@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6](https://github.com/calthejuggler/clux/compare/v0.3.5...v0.3.6) - 2026-07-20
+
+### Other
+
+- keep next in sync with main automatically ([#23](https://github.com/calthejuggler/clux/pull/23))
+- document the next branch as a canary channel ([#22](https://github.com/calthejuggler/clux/pull/22))
+- pin macos runner to macos-26
+
 ## [0.3.5](https://github.com/calthejuggler/clux/compare/v0.3.4...v0.3.5) - 2026-07-09
 
 ### Added
