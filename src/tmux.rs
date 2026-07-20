@@ -140,6 +140,19 @@ pub fn switch_client(target: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Run `command` (a `/bin/sh` command line) inside a centered tmux popup.
+/// Blocks until the popup closes.
+///
+/// The exit status is ignored on purpose: `display-popup -E` exits with the
+/// status of `command`, so it says nothing about whether the popup opened.
+/// Callers needing that must signal it themselves — see `pick_with_builtin`.
+pub fn display_popup(command: &str) -> anyhow::Result<()> {
+    let _ = Command::new("tmux")
+        .args(["display-popup", "-E", "-w", "80%", "-h", "80%", command])
+        .output()?;
+    Ok(())
+}
+
 pub fn display_message(msg: &str) -> anyhow::Result<()> {
     let _ = Command::new("tmux")
         .args(["display-message", msg])

@@ -1,11 +1,13 @@
 pub(crate) mod claude;
 pub(crate) mod history;
+pub(crate) mod pick;
 pub(crate) mod process;
 pub(crate) mod recent;
 pub(crate) mod tmux;
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::path::Path;
 
 struct SessionCounts {
     active: u32,
@@ -316,6 +318,37 @@ pub fn run_select(filter: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+enum PickerKind {
+    Builtin,
+    Fzf,
+    Menu,
+}
+
+/// Decide which picker to use. The built-in fuzzy picker is the default; the
+/// legacy fzf and tmux-menu pickers remain available via `@clux-picker`.
+/// The historical `@clux-fzf off` toggle is still honoured as "use the menu".
+fn resolve_picker_kind() -> anyhow::Result<PickerKind> {
+    if let Some(kind) = tmux::get_global_option("@clux-picker")? {
+        return Ok(match kind.as_str() {
+            "fzf" => PickerKind::Fzf,
+            "menu" => PickerKind::Menu,
+            "builtin" => PickerKind::Builtin,
+            // A typo should not look like the setting having no effect.
+            other => {
+                tmux::display_message(&format!(
+                    "clux: unknown @clux-picker '{other}', using builtin"
+                ))?;
+                PickerKind::Builtin
+            }
+        });
+    }
+    if tmux::get_global_option("@clux-fzf")?.as_deref() == Some("off") {
+        return Ok(PickerKind::Menu);
+    }
+    Ok(PickerKind::Builtin)
+}
+
 /// # Errors
 /// Returns an error if tmux is not running or the picker UI fails to open.
 pub fn run_pick(sort: Option<&str>) -> anyhow::Result<()> {
@@ -326,15 +359,111 @@ pub fn run_pick(sort: Option<&str>) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let fzf_option = tmux::get_global_option("@clux-fzf")?;
-    let fzf_disabled = fzf_option.as_deref() == Some("off");
+    match resolve_picker_kind()? {
+        PickerKind::Fzf if command_exists("fzf-tmux") => pick_with_fzf(&entries),
+        PickerKind::Fzf | PickerKind::Menu => pick_with_menu(&entries),
+        PickerKind::Builtin => pick_with_builtin(&entries),
+    }
+}
 
-    if !fzf_disabled && command_exists("fzf-tmux") {
-        pick_with_fzf(&entries)?;
-    } else {
-        pick_with_menu(&entries)?;
+fn to_pick_item(entry: &ListEntry) -> pick::PickItem {
+    pick::PickItem {
+        target: entry.target.clone(),
+        session_id: entry.session_id.clone(),
+        state: entry.state.to_owned(),
+        mode: entry.mode.to_owned(),
+        active_tasks: entry.active_tasks,
+        active_agents: entry.active_agents,
+        summary: entry.summary.clone(),
+        cwd: entry.cwd.clone(),
+        session_name: entry.session_name.clone(),
+    }
+}
+
+/// Quote a string for safe inclusion in a `/bin/sh -c` command line.
+fn shell_quote(text: &str) -> String {
+    let escaped = text.replace('\'', "'\\''");
+    format!("'{escaped}'")
+}
+
+/// A private directory for the files handed to and from the popup process.
+///
+/// The item list carries session summaries and cwd paths, so it should not be
+/// world-readable in a shared /tmp. Without an explicit mode `tempfile` honours
+/// the umask and typically lands on 0755.
+#[cfg(unix)]
+fn pick_temp_dir() -> anyhow::Result<tempfile::TempDir> {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    Ok(tempfile::Builder::new()
+        .prefix("clux-pick-")
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir()?)
+}
+
+#[cfg(not(unix))]
+fn pick_temp_dir() -> anyhow::Result<tempfile::TempDir> {
+    Ok(tempfile::Builder::new().prefix("clux-pick-").tempdir()?)
+}
+
+/// Launch the built-in picker inside a tmux popup. The popup process renders
+/// the interactive UI and writes the chosen `session_id\ttarget` to a temp
+/// file; the switch itself happens here, in the run-shell context where the
+/// originating client is known.
+///
+/// Falls back to the tmux menu when the popup never opened: `display-popup`
+/// needs tmux 3.2, and since this picker is the default, older tmux would
+/// otherwise leave the keybinding doing nothing.
+fn pick_with_builtin(entries: &[ListEntry]) -> anyhow::Result<()> {
+    let items: Vec<pick::PickItem> = entries.iter().map(to_pick_item).collect();
+    let exe = std::env::current_exe()?;
+
+    let dir = pick_temp_dir()?;
+    let input_path = dir.path().join("items.json");
+    let result_path = dir.path().join("selection");
+
+    pick::write_items(&input_path, &items)?;
+
+    let command = format!(
+        "{} __pick-ui {} {}",
+        shell_quote(&exe.to_string_lossy()),
+        shell_quote(&input_path.to_string_lossy()),
+        shell_quote(&result_path.to_string_lossy()),
+    );
+
+    tmux::display_popup(&command)?;
+
+    // The UI always writes this file, empty on cancel, so a missing one means
+    // the popup never opened. See `display_popup` for why the exit status
+    // cannot tell us that.
+    let Ok(raw) = std::fs::read_to_string(&result_path) else {
+        return pick_with_menu(entries);
+    };
+
+    if let Some((session_id, target)) = raw.trim().split_once('\t')
+        && !target.is_empty()
+    {
+        drop(recent::record_switch(session_id));
+        tmux::switch_client(target)?;
     }
 
+    Ok(())
+}
+
+/// # Errors
+/// Returns an error if the item list cannot be read or the terminal UI fails.
+///
+/// Internal entry point invoked inside the tmux popup by `pick_with_builtin`.
+pub fn run_pick_ui(input: &Path, result: &Path) -> anyhow::Result<()> {
+    let items = pick::read_items(input)?;
+    let selection = pick::run(&items)?
+        .and_then(|index| items.get(index))
+        .map_or_else(String::new, |item| {
+            format!("{}\t{}", item.session_id, item.target)
+        });
+    // Written unconditionally, empty on cancel: `pick_with_builtin` reads a
+    // missing file as "the popup never opened" and falls back to the menu.
+    std::fs::write(result, selection)?;
     Ok(())
 }
 
@@ -432,6 +561,30 @@ fn pick_with_menu(entries: &[ListEntry]) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn pick_temp_dir_is_not_readable_by_other_users() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = pick_temp_dir().expect("temp dir");
+        let mode = std::fs::metadata(dir.path())
+            .expect("metadata")
+            .permissions()
+            .mode();
+
+        // Without an explicit mode this lands on 0755 in a shared /tmp.
+        assert_eq!(mode & 0o777, 0o700, "mode was {:o}", mode & 0o777);
+    }
+
+    #[test]
+    fn shell_quote_neutralises_embedded_quotes() {
+        // Session names reach the popup command line; a crafted one must not
+        // be able to escape it.
+        assert_eq!(shell_quote("plain"), "'plain'");
+        assert_eq!(shell_quote("it's"), r"'it'\''s'");
+        assert_eq!(shell_quote("'; rm -rf /; '"), r"''\''; rm -rf /; '\'''");
+    }
 
     #[test]
     fn format_info_all_active() {
