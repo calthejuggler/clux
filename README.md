@@ -97,6 +97,31 @@ Then in your home config:
 
 `tmuxPlugin` has the binary bundled in the store, so there's no download at startup.
 
+### Canary builds
+
+Development lands on the `next` branch before it reaches `main`. If you want new
+features early and don't mind the occasional rough edge, you can track `next`
+instead of a release.
+
+**Nix flake:**
+
+```nix
+inputs.clux.url = "github:calthejuggler/clux/next";
+```
+
+**tmux plugin:**
+
+```sh
+set -g @plugin 'calthejuggler/clux#next'
+```
+
+Both build from source, so you get whatever is on `next` when you update. Drop
+the `/next` or `#next` suffix to go back to stable.
+
+Canary builds aren't published to crates.io and have no pre-built binaries --
+`install.sh` always fetches the latest stable release. Expect tmux options to
+change without notice on `next`.
+
 ## CLI usage
 
 ```
