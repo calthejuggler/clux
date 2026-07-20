@@ -131,7 +131,7 @@ Commands:
   update  Update tmux session variables with Claude Code status
   list    List Claude Code sessions (tab-separated)
   select  Open tmux choose-tree with Claude Code status
-  pick    Open a Claude-only session picker (fzf or tmux menu)
+  pick    Open a Claude-only session picker (built-in, fzf, or tmux menu)
 ```
 
 `clux list` is the most useful one outside of tmux. It prints a tab-separated table of all Claude Code sessions it can find, with their state, mode, task/agent counts, summary, working directory, and tmux session name.
@@ -157,7 +157,8 @@ These options are set in your `.tmux.conf` and only apply when using clux as a t
 | `@clux-claude-key` | `a` | Key to bind the Claude-only picker (after prefix) |
 | `@clux-format` | ` \| {total} ({detail})` | Format string for session status |
 | `@clux-filter-binds` | _(none)_ | Comma-separated `key:filter` pairs for filtered pickers |
-| `@clux-fzf` | _(on)_ | Set to `off` to use tmux menus instead of fzf in the Claude picker |
+| `@clux-picker` | `builtin` | Claude picker UI: `builtin`, `fzf`, or `menu` |
+| `@clux-fzf` | _(on)_ | Deprecated. Set to `off` to use tmux menus (same as `@clux-picker 'menu'`) |
 | `@clux-recaps` | _(on)_ | Set to `off` to use history summaries instead of Claude Code recaps |
 | `@clux-sort` | `recent` | Sort order for `list` and `pick` commands |
 
@@ -167,7 +168,58 @@ The Claude picker (`prefix + a`) gives you a focused view of just your Claude se
 
 If Claude Code has produced a recap and no conversation message has been written after it, clux uses that recap as the summary. Set `@clux-recaps` to `off` to always use the older history-based summary.
 
-If you have `fzf-tmux` installed, it uses that for fuzzy finding. Otherwise it falls back to a tmux display-menu. You can force the menu with `set -g @clux-fzf 'off'`.
+By default the picker opens in a tmux popup running clux's own fuzzy finder, which
+has two modes so you can navigate without leaving the home row. It starts in
+search mode, so you can just type.
+
+**Search mode** (where you start, and after pressing `/`):
+
+| Key | Action |
+|-----|--------|
+| _(type)_ | Fuzzy-filter the list |
+| `↑` / `↓` | Move up / down |
+| `Backspace` | Delete a character |
+| `Ctrl-u` | Clear the query |
+| `Enter` | Switch to the selected session |
+| `Esc` | Back to normal mode, keeping the filter |
+
+**Normal mode** (after pressing `Esc`):
+
+| Key | Action |
+|-----|--------|
+| `j` / `↓` | Move down |
+| `k` / `↑` | Move up |
+| `g` / `G` | Jump to first / last |
+| `/` | Back to search mode |
+| `Enter` | Switch to the selected session |
+| `q` | Quit without switching |
+
+In either mode, `Ctrl-p` / `Ctrl-n` move up and down, `Ctrl-y` switches to the
+selected session, `Ctrl-u` clears the query, and `Ctrl-c` quits.
+
+`Esc` always backs out one level rather than quitting outright: search mode →
+normal mode → clear the filter → quit. It can never close the picker out from
+under an active search, and the hint line at the bottom always shows what the
+next `Esc` will do. Use `q` or `Ctrl-c` when you want to leave immediately.
+
+Matching is fuzzy and case-insensitive across the summary, working directory,
+session name, mode, and state, scoring consecutive and word-boundary matches
+highest. Matched characters are highlighted in the results. Pressing `Esc` in
+search mode drops you back into normal mode with the filter still applied, so you
+can narrow the list by typing and then move through the results with `j`/`k`.
+
+Columns are colour-coded so you can scan the list quickly: `active` sessions are
+green and `idle` ones muted, and the mode column is blue for `plan`, yellow for
+`acceptEdits`, and red for `yolo`. Zero task and agent counts are dimmed, working
+directories are blue, and session names magenta.
+
+If you'd rather use something else, set `@clux-picker` to `fzf` (uses `fzf-tmux`,
+falling back to the menu if it isn't installed) or `menu` (a plain tmux
+display-menu). The older `set -g @clux-fzf 'off'` still works and is equivalent
+to `menu`.
+
+The built-in picker needs `display-popup`, which arrived in tmux 3.2. On older
+tmux it falls back to the menu automatically, so the keybinding keeps working.
 
 ### Sort order
 
@@ -220,6 +272,7 @@ This binds `prefix + s` to the full session picker, `prefix + a` to the Claude p
 - [x] Session filtering options
 - [x] Claude picker with mode, tasks, and sub-agent info
 - [x] fzf integration
+- [x] Built-in fuzzy picker with normal/search modes
 - [x] Standalone CLI with proper `--help`
 - [x] Published on crates.io
 - [x] Configurable sort order
