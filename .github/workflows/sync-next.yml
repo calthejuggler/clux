@@ -1,0 +1,50 @@
+name: Sync next
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-next
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Rebase next onto main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: next
+          fetch-depth: 0
+
+      - name: Rebase
+        id: rebase
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git merge-base --is-ancestor origin/main next; then
+            echo "next already contains main, nothing to do"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Replays any commits unique to next on top of main. Degenerates to a
+          # fast-forward when next has none of its own.
+          if ! git rebase origin/main; then
+            git rebase --abort || true
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::error::Rebasing next onto main hit a conflict. Resolve it locally: git checkout next && git rebase origin/main && git push --force-with-lease origin next"
+            exit 1
+          fi
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Push
+        if: steps.rebase.outputs.changed == 'true'
+        run: git push --force-with-lease origin next
